@@ -11,7 +11,6 @@ import gobject
 gobject.threads_init()
 import gst
 
-import pydb
 
 
 class VideoApp(QtGui.QMainWindow, video.Ui_MainWindow):
@@ -45,10 +44,10 @@ class VideoApp(QtGui.QMainWindow, video.Ui_MainWindow):
 class Vid:
     def __init__(self, windowId):
         self.player = gst.Pipeline("player")
-        self.source = gst.element_factory_make("videotestsrc", "vsource")
-        #self.source = gst.element_factory_make("v4l2src", "vsource")
+        #self.source = gst.element_factory_make("videotestsrc", "vsource")
+        self.source = gst.element_factory_make("v4l2src", "vsource")
         self.sink = gst.element_factory_make("autovideosink", "outsink")
-        #self.source.set_property("device", "/dev/video0")
+        self.source.set_property("device", "/dev/video0")
         #self.scaler = gst.element_factory_make("videoscale", "vscale")
         #self.fvidscale = gst.element_factory_make("videoscale", "fvidscale")
         #self.fvidscale_cap = gst.element_factory_make("capsfilter", "fvidscale_cap")
