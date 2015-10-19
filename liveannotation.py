@@ -4,6 +4,8 @@ import sys
 from PyQt4 import QtCore, QtGui, uic
 import pyqtgraph as pg
 from pyqtgraph.ptime import time
+from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
+
 
 import numpy as np
 
@@ -113,6 +115,9 @@ class VideoWidget:
         pass
 
 
+class ParameterTree:
+    def __init__(self):
+        pass
 
 
 class PlotWidget:
