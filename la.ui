@@ -200,7 +200,7 @@
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_2">
             <item>
-             <widget class="PlotWidget" name="plotView"/>
+             <widget class="GraphicsLayoutWidget" name="graphicsLayoutView"/>
             </item>
             <item>
              <widget class="QLabel" name="label">
@@ -233,7 +233,7 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>PlotWidget</class>
+   <class>GraphicsLayoutWidget</class>
    <extends>QGraphicsView</extends>
    <header location="global">pyqtgraph</header>
   </customwidget>
