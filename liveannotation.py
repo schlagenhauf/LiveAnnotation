@@ -21,13 +21,14 @@ import numpy as np
 #   Sensor data
 #   Labels
 
+########## Application GUI
 
-
-form_class = uic.loadUiType("la.ui")[0]
+main_form = uic.loadUiType("la.ui")[0]
+dialog_form = uic.loadUiType("ad.ui")[0]
 
 
 ## Top level class for main window and module instances
-class LiveAnnotation(QtGui.QMainWindow, form_class):
+class LiveAnnotation(QtGui.QMainWindow, main_form):
     ## Constructor
     def __init__(self, args, parent=None):
         QtGui.QMainWindow.__init__(self,parent)
@@ -37,7 +38,7 @@ class LiveAnnotation(QtGui.QMainWindow, form_class):
         self.config = ParameterTreeWidget(self.parameterView)
         self.stream = VideoWidget(self.videoView.winId())
         self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
-        self.annotator = Annotator()
+        self.annotatorConfig = AnnotationConfigWidget(self.frameKeys)
 
         # connect elements
         self.btnPlay.clicked.connect(self.stream.play)
@@ -56,14 +57,12 @@ class LiveAnnotation(QtGui.QMainWindow, form_class):
         self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
 
 
-        # plot config
 
 
-        # annotator config
 
-
-# Widget managing plotting
+## Widget managing plotting
 class GraphicsLayoutWidget:
+    ## Constructor
     def __init__(self, widget):
         # create plot window
         self.w = widget
@@ -71,17 +70,6 @@ class GraphicsLayoutWidget:
 
         self.labels = []
         self.data = np.zeros((0,0)) # a matrix containing data for each dimension per row
-
-
-    def updateNumberOfPlots(self):
-        numDims = len(self.data)
-        while len(self.plots) < numDims:
-            self.plots.append(self.w.addPlot())
-            self.plots[-1].plot()
-            self.plots[-1].showGrid(True, True)
-            self.w.nextRow()
-
-        self.updatePlotLabels()
 
 
     def update(self):
@@ -96,52 +84,53 @@ class GraphicsLayoutWidget:
         self.labels = labels
         self.updatePlotLabels()
 
+
     def setData(self, data):
         self.data = data
 
-    def updatePlotLabels(self):
+
+    def __updatePlotLabels(self):
         # assign y axis labels (if more/less labels are given, list is truncated accordingly)
         for p,l in zip(self.plots, self.labels):
             p.setLabel('left', l)
 
 
+    def __updateNumberOfPlots(self):
+        numDims = len(self.data)
+        while len(self.plots) < numDims:
+            self.plots.append(self.w.addPlot())
+            self.plots[-1].plot()
+            self.plots[-1].showGrid(True, True)
+            self.w.nextRow()
 
-# Widget managing video stream
+        self.updatePlotLabels()
+
+
+
+## Widget managing video stream
 class VideoWidget:
+    ## Constructor
     def __init__(self, winId):
         assert winId
         self.winId = winId
 
-    def onMessage(self, bus, message):
-        t = message.type
-        if t == gst.MESSAGE_EOS:
-            self.player.set_state(gst.STATE_NULL)
-        elif t == gst.MESSAGE_ERROR:
-           err, debug = message.parse_error()
-           print "Error: %s" % err, debug
-           self.player.set_state(gst.STATE_NULL)
-
-    def onSyncMessage(self, bus, message):
-        if message.structure is None:
-            return
-        message_name = message.structure.get_name()
-        if message_name == "prepare-xwindow-id":
-            imagesink = message.src
-            imagesink.set_property("force-aspect-ratio", True)
-            imagesink.set_xwindow_id(self.winId)
 
     def play(self):
         self.pipeline.set_state(gst.STATE_PLAYING)
 
+
     def pause(self):
         self.pipeline.set_state(gst.STATE_NULL)
+
 
     def startRecording(self, path):
         # enable pipeline output to file
         pass
 
+
     def stopRecording(self):
         pass
+
 
     def updatePipeline(self, source):
         print "create pipeline"
@@ -159,13 +148,33 @@ class VideoWidget:
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.enable_sync_message_emission()
-        bus.connect("message", self.onMessage)
-        bus.connect("sync-message::element", self.onSyncMessage)
+        bus.connect("message", self.__onMessage)
+        bus.connect("sync-message::element", self.__onSyncMessage)
+
+
+    def __onMessage(self, bus, message):
+        t = message.type
+        if t == gst.MESSAGE_EOS:
+            self.player.set_state(gst.STATE_NULL)
+        elif t == gst.MESSAGE_ERROR:
+           err, debug = message.parse_error()
+           print "Error: %s" % err, debug
+           self.player.set_state(gst.STATE_NULL)
+
+    def __onSyncMessage(self, bus, message):
+        if message.structure is None:
+            return
+        message_name = message.structure.get_name()
+        if message_name == "prepare-xwindow-id":
+            imagesink = message.src
+            imagesink.set_property("force-aspect-ratio", True)
+            imagesink.set_xwindow_id(self.winId)
 
 
 
-# Widget populating and reading configuration
+## Widget populating and reading configuration
 class ParameterTreeWidget:
+    ## Constructor
     def __init__(self, parameterView):
         defaultParams = [
             {'name': 'General', 'type': 'group', 'children': [
@@ -184,7 +193,7 @@ class ParameterTreeWidget:
         self.t.show()
 
 
-    # recursively go through the tree and search for a parameter with <key>
+    ## recursively go through the tree and search for a parameter with <key>
     # returns None if no fitting value was found
     def getConfigValue(self, key, tree = None):
         if tree is None:
@@ -211,21 +220,34 @@ class ParameterTreeWidget:
 
 
 
-## Container for label information
-class LabelMeta:
+class AddDialog(QtGui.QMainWindow, dialog_form):
     ## Constructor
-    def __init__(self, name, key, description, toggleMode):
-        self.name = name
-        self.key = key
-        self.description = description
-        self.toggleMode = toggleMode
+    def __init__(self, args, parent=None, content = None):
+        QtGui.QMainWindow.__init__(self,parent)
+        self.setupUi(self)
+
+
+    def accept(self):
+        pass
+
+
+    def reject(self):
+        pass
 
 
 ## Class managing the annotation configuration widget
 class AnnotationConfigWidget:
     ## Constructor
-    def __init__(self):
-        pass
+    def __init__(self, widget):
+        # get access to all elements in the annotation config qframe
+        self.tableWidget = widget.findChild(QtGui.QTableWidget, "keyTable")
+        widget.findChild(QtGui.QPushButton, "btnAddKey").clicked.connect(self.__onAddKey)
+        widget.findChild(QtGui.QPushButton, "btnModKey").clicked.connect(self.__onModKey)
+        widget.findChild(QtGui.QPushButton, "btnDelKey").clicked.connect(self.__onDelKey)
+
+        self.annotatorConfig = {}
+        # listen to keypress events and send signals
+
 
     ## Sets the displayed configuration by a list of LabelMeta instances
     def setConfig(self, cfg):
@@ -235,6 +257,44 @@ class AnnotationConfigWidget:
     ## Returns the (modified) configuration as a list of LabelMeta instances
     def getConfig(self):
         pass
+
+
+    def __onAddKey(self):
+        # open dialog window
+        lm = LabelMeta()
+        dialog = AddDialog(args = [], content = lm)
+        dialog.show()
+
+    def __onDelKey(self):
+        # get currently selected item and delete it
+        pass
+
+
+    def __onModKey(self):
+        # get currently selected item and open the additem dialog
+        pass
+
+
+    def __updateTableWidget(self):
+        self.tableWidget.clearContents()
+        self.tableWidget.setRowCount(len(self.keys))
+
+        for kv, i in zip(self.keys.iteritems(), range(len(self.keys))):
+            self.tableWidget.setItem(i, 0, QtGui.QTableWidgetItem(kv[0]))
+
+
+
+########## Application Logic
+
+
+## Container for label information
+class LabelMeta:
+    ## Constructor
+    def __init__(self, name = "", key = "", description = "", toggleMode = True):
+        self.name = name
+        self.key = key
+        self.description = description
+        self.toggleMode = toggleMode
 
 
 ## A tool for annotating a stream of sensor data with labels

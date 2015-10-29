@@ -47,6 +47,15 @@
              </property>
              <item row="0" column="0">
               <widget class="QTableWidget" name="keyTable">
+               <property name="selectionMode">
+                <enum>QAbstractItemView::SingleSelection</enum>
+               </property>
+               <property name="sortingEnabled">
+                <bool>true</bool>
+               </property>
+               <attribute name="horizontalHeaderShowSortIndicator" stdset="0">
+                <bool>true</bool>
+               </attribute>
                <attribute name="horizontalHeaderStretchLastSection">
                 <bool>true</bool>
                </attribute>
@@ -62,6 +71,11 @@
                </column>
                <column>
                 <property name="text">
+                 <string>Toggle</string>
+                </property>
+               </column>
+               <column>
+                <property name="text">
                  <string>Description</string>
                 </property>
                </column>
@@ -70,24 +84,42 @@
              <item row="1" column="0">
               <widget class="QWidget" name="widget_2" native="true">
                <layout class="QHBoxLayout" name="horizontalLayout_2">
-                <property name="spacing">
-                 <number>6</number>
-                </property>
-                <property name="margin">
-                 <number>0</number>
-                </property>
+                <item>
+                 <spacer name="horizontalSpacer">
+                  <property name="orientation">
+                   <enum>Qt::Horizontal</enum>
+                  </property>
+                  <property name="sizeType">
+                   <enum>QSizePolicy::Expanding</enum>
+                  </property>
+                  <property name="sizeHint" stdset="0">
+                   <size>
+                    <width>40</width>
+                    <height>20</height>
+                   </size>
+                  </property>
+                 </spacer>
+                </item>
                 <item>
                  <widget class="QPushButton" name="btnAddKey">
                   <property name="text">
-                   <string>Add Key</string>
+                   <string>Add</string>
                   </property>
                  </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="keyEdit"/>
+                 <widget class="QPushButton" name="btnModKey">
+                  <property name="text">
+                   <string>Modify</string>
+                  </property>
+                 </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="classEdit"/>
+                 <widget class="QPushButton" name="btnDelKey">
+                  <property name="text">
+                   <string>Delete</string>
+                  </property>
+                 </widget>
                 </item>
                </layout>
               </widget>
@@ -140,9 +172,9 @@
               <widget class="QWidget" name="widget" native="true">
                <layout class="QHBoxLayout" name="horizontalLayout">
                 <item>
-                 <widget class="QLabel" name="videoLabel">
+                 <widget class="QLabel" name="labelVideoStatus">
                   <property name="text">
-                   <string>TextLabel</string>
+                   <string>-</string>
                   </property>
                  </widget>
                 </item>
@@ -203,9 +235,9 @@
              <widget class="GraphicsLayoutWidget" name="graphicsLayoutView"/>
             </item>
             <item>
-             <widget class="QLabel" name="label">
+             <widget class="QLabel" name="labelPlotStatus">
               <property name="text">
-               <string>TextLabel</string>
+               <string>-</string>
               </property>
              </widget>
             </item>
