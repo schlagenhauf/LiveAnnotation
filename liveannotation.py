@@ -26,7 +26,9 @@ import numpy as np
 form_class = uic.loadUiType("la.ui")[0]
 
 
+## Top level class for main window and module instances
 class LiveAnnotation(QtGui.QMainWindow, form_class):
+    ## Constructor
     def __init__(self, args, parent=None):
         QtGui.QMainWindow.__init__(self,parent)
         self.setupUi(self)
@@ -46,7 +48,7 @@ class LiveAnnotation(QtGui.QMainWindow, form_class):
 
 
 
-    # sets all config values anew (e.g. after changing the config)
+    ## Sets all config values anew (e.g. after changing the config)
     # only use getConfigValue here, to ensure that all values are updated
     def updateConfigurables(self):
         # video config
@@ -60,6 +62,7 @@ class LiveAnnotation(QtGui.QMainWindow, form_class):
         # annotator config
 
 
+# Widget managing plotting
 class GraphicsLayoutWidget:
     def __init__(self, widget):
         # create plot window
@@ -103,6 +106,7 @@ class GraphicsLayoutWidget:
 
 
 
+# Widget managing video stream
 class VideoWidget:
     def __init__(self, winId):
         assert winId
@@ -160,6 +164,7 @@ class VideoWidget:
 
 
 
+# Widget populating and reading configuration
 class ParameterTreeWidget:
     def __init__(self, parameterView):
         defaultParams = [
@@ -206,35 +211,54 @@ class ParameterTreeWidget:
 
 
 
-# A tool for annotating a stream of sensor data with labels
-class Annotator:
+## Container for label information
+class LabelMeta:
+    ## Constructor
+    def __init__(self, name, key, description, toggleMode):
+        self.name = name
+        self.key = key
+        self.description = description
+        self.toggleMode = toggleMode
+
+
+## Class managing the annotation configuration widget
+class AnnotationConfigWidget:
+    ## Constructor
     def __init__(self):
         pass
 
+    ## Sets the displayed configuration by a list of LabelMeta instances
+    def setConfig(self, cfg):
+        pass
+
+
+    ## Returns the (modified) configuration as a list of LabelMeta instances
+    def getConfig(self):
+        pass
+
+
+## A tool for annotating a stream of sensor data with labels
+class Annotator:
+    ## Constructor
+    def __init__(self):
+        self.labelMapping = [] # list of LabelMeta instances
+        self.annotations = [] # list of touples containing label, index, and start/stop flag
+
+    ## Returns the annotations
     def getData(self):
         pass
 
-    def getLabels(self):
+    ## Returns the key map, the known labels, their description and their toggle mode
+    def getMeta(self):
         pass
 
-    def setLabel(self, label, start, count):
+    ## Set the key map, the known labels, their description and their toggle mode
+    def setMeta(self, label, start, count):
         pass
 
-    def saveAnnotation(self, path):
-        pass
-
+    ## Filters key press / release events and controls the currrent labeling
     def processKeyPress(self, key):
         pass
-
-
-        ## dictionary for key bindings
-        #self.keys = {}
-
-
-
-
-    #def addKey(self, key, cls):
-    #    self.keys[key] = cls;
 
 
     #def onAddKey(self):
