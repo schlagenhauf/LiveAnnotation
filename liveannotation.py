@@ -53,7 +53,6 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
     # only use getConfigValue here, to ensure that all values are updated
     def updateConfigurables(self):
         # video config
-        print self.config.getConfigValue('Video Source')
         self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
 
 
@@ -132,8 +131,6 @@ class VideoWidget:
 
 
     def updatePipeline(self, source):
-        print "create pipeline"
-
         # create pipeline, source and sink
         self.pipeline = gst.Pipeline("videopl")
         self.source = gst.element_factory_make(source, "vsource")
@@ -234,11 +231,11 @@ class AddDialog(QtGui.QDialog, dialog_form):
 
     ## Setter for filling in values when modifying
     def setValues(self, lm):
-        self.editName.setText(content.name)
-        self.editKeyMap.setText(content.key)
-        self.radioToggle.setChecked(content.toggleMode)
-        self.radioHold.setChecked(not content.toggleMode)
-        self.editDescription.setText(content.description)
+        self.editName.setText(lm.name)
+        self.editKeyMap.setText(lm.key)
+        self.radioToggle.setChecked(lm.toggleMode)
+        self.radioHold.setChecked(not lm.toggleMode)
+        self.editDescription.setText(lm.description)
 
 
     ## reads out the forms and returns LabelMeta instance
@@ -252,6 +249,7 @@ class AddDialog(QtGui.QDialog, dialog_form):
         self.close()
 
 
+
 ## Class managing the annotation configuration widget
 class AnnotationConfigWidget:
     ## Constructor
@@ -263,7 +261,8 @@ class AnnotationConfigWidget:
         widget.findChild(QtGui.QPushButton, "btnModKey").clicked.connect(self.__onModKey)
         widget.findChild(QtGui.QPushButton, "btnDelKey").clicked.connect(self.__onDelKey)
 
-        self.annotatorConfig = []
+        self.annotatorConfig = {}
+        self.syncLists()
         # listen to keypress events and send signals
 
 
@@ -277,9 +276,26 @@ class AnnotationConfigWidget:
         pass
 
 
-    ## find item with matching name and modify it. if there is none, create one
-    def modItem(self, lm):
-        print lm.name + ' ' + lm.key + ' ' + lm.description + ' ' + str(lm.toggleMode)
+    ## Synchronizes the internal list with the displayed table
+    def syncLists(self):
+        # save sort column and order for sorting afterwards
+        sortCol = self.tableWidget.horizontalHeader().sortIndicatorSection()
+        sortOrd = self.tableWidget.horizontalHeader().sortIndicatorOrder()
+
+        # clear table and reinsert all items
+        self.tableWidget.clearContents()
+        self.tableWidget.setRowCount(len(self.annotatorConfig))
+        for i,v in enumerate(self.annotatorConfig.itervalues()):
+            self.tableWidget.setItem(i,0,QtGui.QTableWidgetItem(v.name))
+            self.tableWidget.setItem(i,1,QtGui.QTableWidgetItem(v.key))
+            if v.toggleMode:
+                self.tableWidget.setItem(i,2,QtGui.QTableWidgetItem("Toggle"))
+            else:
+                self.tableWidget.setItem(i,2,QtGui.QTableWidgetItem("Hold"))
+            self.tableWidget.setItem(i,3,QtGui.QTableWidgetItem(v.description))
+
+        # sort table again
+        self.tableWidget.sortItems(sortCol, sortOrd)
 
 
     def __onAddKey(self):
@@ -289,7 +305,9 @@ class AnnotationConfigWidget:
         dialog.setModal(True)
         if dialog.exec_(): # if dialog closes with accept()
             lm = dialog.lm
-            print lm.name + ' ' + lm.key + ' ' + lm.description + ' ' + str(lm.toggleMode)
+            #print lm.name + ' ' + lm.key + ' ' + lm.description + ' ' + str(lm.toggleMode)
+            self.annotatorConfig[lm.name] = lm
+            self.syncLists()
 
 
     def __onDelKey(self):
@@ -299,12 +317,17 @@ class AnnotationConfigWidget:
 
     def __onModKey(self):
         # get currently selected item and open the additem dialog
+        row = self.tableWidget.currentRow()
+        label = self.tableWidget.item(row,0).text()
+        lmOld = self.annotatorConfig[label]
         # open dialog window
         dialog = AddDialog(args = [], parent=self.widget)
         dialog.setModal(True)
-        dialog.setValues(lm)
+        dialog.setValues(lmOld)
         if dialog.exec_():
-            lm = dialog.lm
+            lmNew = dialog.lm
+            self.annotatorConfig[lmNew.name] = lmNew
+            self.syncLists()
 
 
     def __updateTableWidget(self):
