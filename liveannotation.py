@@ -59,7 +59,6 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
 
 
 
-
 ## Widget managing plotting
 class GraphicsLayoutWidget:
     ## Constructor
@@ -220,19 +219,37 @@ class ParameterTreeWidget:
 
 
 
-class AddDialog(QtGui.QMainWindow, dialog_form):
+# Subwindow to add / modify a new label type
+class AddDialog(QtGui.QDialog, dialog_form):
     ## Constructor
-    def __init__(self, args, parent=None, content = None):
-        QtGui.QMainWindow.__init__(self,parent)
+    def __init__(self, args, parent):
+        QtGui.QDialog.__init__(self,parent)
         self.setupUi(self)
+        self.parent = parent
+
+        # connect ok / cancel buttons
+        self.buttonBox.accepted.connect(self.__onAccept)
+        self.buttonBox.rejected.connect(self.__onReject)
 
 
-    def accept(self):
-        pass
+    ## Setter for filling in values when modifying
+    def setValues(self, lm):
+        self.editName.setText(content.name)
+        self.editKeyMap.setText(content.key)
+        self.radioToggle.setChecked(content.toggleMode)
+        self.radioHold.setChecked(not content.toggleMode)
+        self.editDescription.setText(content.description)
 
 
-    def reject(self):
-        pass
+    ## reads out the forms and returns LabelMeta instance
+    def __onAccept(self):
+        self.lm = LabelMeta(self.editName.text(), self.editKeyMap.text(), self.editDescription.toPlainText(), self.radioToggle.isChecked())
+        self.accept()
+
+
+    ## just close the window
+    def __onReject(self):
+        self.close()
 
 
 ## Class managing the annotation configuration widget
@@ -240,12 +257,13 @@ class AnnotationConfigWidget:
     ## Constructor
     def __init__(self, widget):
         # get access to all elements in the annotation config qframe
+        self.widget = widget
         self.tableWidget = widget.findChild(QtGui.QTableWidget, "keyTable")
         widget.findChild(QtGui.QPushButton, "btnAddKey").clicked.connect(self.__onAddKey)
         widget.findChild(QtGui.QPushButton, "btnModKey").clicked.connect(self.__onModKey)
         widget.findChild(QtGui.QPushButton, "btnDelKey").clicked.connect(self.__onDelKey)
 
-        self.annotatorConfig = {}
+        self.annotatorConfig = []
         # listen to keypress events and send signals
 
 
@@ -259,11 +277,20 @@ class AnnotationConfigWidget:
         pass
 
 
+    ## find item with matching name and modify it. if there is none, create one
+    def modItem(self, lm):
+        print lm.name + ' ' + lm.key + ' ' + lm.description + ' ' + str(lm.toggleMode)
+
+
     def __onAddKey(self):
         # open dialog window
-        lm = LabelMeta()
-        dialog = AddDialog(args = [], content = lm)
-        dialog.show()
+        content = None
+        dialog = AddDialog(args = [], parent=self.widget)
+        dialog.setModal(True)
+        if dialog.exec_(): # if dialog closes with accept()
+            lm = dialog.lm
+            print lm.name + ' ' + lm.key + ' ' + lm.description + ' ' + str(lm.toggleMode)
+
 
     def __onDelKey(self):
         # get currently selected item and delete it
@@ -272,7 +299,12 @@ class AnnotationConfigWidget:
 
     def __onModKey(self):
         # get currently selected item and open the additem dialog
-        pass
+        # open dialog window
+        dialog = AddDialog(args = [], parent=self.widget)
+        dialog.setModal(True)
+        dialog.setValues(lm)
+        if dialog.exec_():
+            lm = dialog.lm
 
 
     def __updateTableWidget(self):

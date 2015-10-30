@@ -10,6 +10,18 @@
     <height>494</height>
    </rect>
   </property>
+  <property name="minimumSize">
+   <size>
+    <width>400</width>
+    <height>494</height>
+   </size>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>400</width>
+    <height>494</height>
+   </size>
+  </property>
   <property name="windowTitle">
    <string>Add / Modify Key Mapping</string>
   </property>
@@ -48,6 +60,9 @@
        <widget class="QRadioButton" name="radioToggle">
         <property name="text">
          <string>Toggle</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
