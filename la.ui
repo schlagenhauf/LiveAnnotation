@@ -71,7 +71,7 @@
                </column>
                <column>
                 <property name="text">
-                 <string>Toggle</string>
+                 <string>Mode</string>
                 </property>
                </column>
                <column>

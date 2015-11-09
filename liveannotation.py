@@ -49,12 +49,11 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
 
 
 
-    ## Sets all config values anew (e.g. after changing the config)
+    ## Sets all config values again (e.g. after changing the config)
     # only use getConfigValue here, to ensure that all values are updated
     def updateConfigurables(self):
         # video config
         self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
-
 
 
 
@@ -232,7 +231,7 @@ class AddDialog(QtGui.QDialog, dialog_form):
     ## Setter for filling in values when modifying
     def setValues(self, lm):
         self.editName.setText(lm.name)
-        self.editKeyMap.setText(lm.key)
+        self.editKeyMap.setText(lm.key.toString())
         self.radioToggle.setChecked(lm.toggleMode)
         self.radioHold.setChecked(not lm.toggleMode)
         self.editDescription.setText(lm.description)
@@ -240,7 +239,7 @@ class AddDialog(QtGui.QDialog, dialog_form):
 
     ## reads out the forms and returns LabelMeta instance
     def __onAccept(self):
-        self.lm = LabelMeta(self.editName.text(), self.editKeyMap.text(), self.editDescription.toPlainText(), self.radioToggle.isChecked())
+        self.lm = LabelMeta(self.editName.text(), QtGui.QKeySequence(self.editKeyMap.text()), self.editDescription.toPlainText(), self.radioToggle.isChecked())
         self.accept()
 
 
@@ -287,7 +286,7 @@ class AnnotationConfigWidget:
         self.tableWidget.setRowCount(len(self.annotatorConfig))
         for i,v in enumerate(self.annotatorConfig.itervalues()):
             self.tableWidget.setItem(i,0,QtGui.QTableWidgetItem(v.name))
-            self.tableWidget.setItem(i,1,QtGui.QTableWidgetItem(v.key))
+            self.tableWidget.setItem(i,1,QtGui.QTableWidgetItem(v.key.toString()))
             if v.toggleMode:
                 self.tableWidget.setItem(i,2,QtGui.QTableWidgetItem("Toggle"))
             else:
@@ -296,6 +295,17 @@ class AnnotationConfigWidget:
 
         # sort table again
         self.tableWidget.sortItems(sortCol, sortOrd)
+
+        # update key map
+        self.shortcuts = []
+        for v in self.annotatorConfig.itervalues():
+            self.shortcuts.append(QtGui.QShortcut(v.key, self.widget, self.__onShortcutEnable))
+
+
+    def __onShortcutEnable(self):
+        # trigger corresponding label
+        print 'shortcut pressed'
+
 
 
     def __onAddKey(self):
@@ -345,7 +355,7 @@ class AnnotationConfigWidget:
 ## Container for label information
 class LabelMeta:
     ## Constructor
-    def __init__(self, name = "", key = "", description = "", toggleMode = True):
+    def __init__(self, name = "", key = None, description = "", toggleMode = True):
         self.name = name
         self.key = key
         self.description = description
