@@ -25,7 +25,7 @@ def stop():
 # get all available data from the source and emit signals
 def processData():
     # get data
-    while True:
+    while select.select([sys.stdin], [], [], 0)[0]:
         line = source.readline()
         if line:
             # read space separated data fields

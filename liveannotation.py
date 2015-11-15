@@ -2,13 +2,16 @@
 
 import sys
 from PyQt4 import QtCore, QtGui, uic
+from PyQt4.QtCore import pyqtSlot, pyqtSignal
 from pyqtgraph.parametertree import Parameter
+import pyqtgraph as pg
 
 import gst, gobject
 gobject.threads_init()
 
 import numpy as np
 
+import dataparser as dp
 
 
 # Gui to Annotator:
@@ -39,10 +42,17 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         self.stream = VideoWidget(self.videoView.winId())
         self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
         self.annotatorConfig = AnnotationConfigWidget(self.frameKeys)
+        self.annotator = Annotator()
 
         # connect elements
         self.btnPlay.clicked.connect(self.stream.play)
         self.btnPause.clicked.connect(self.stream.pause)
+
+        self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
+        self.annotatorConfig.keyPressSignal.connect(self.annotator.onShortcutEnable)
+
+        dp.connect(self.plotter.dataSlot)
+        dp.connect(self.annotator.dataSlot)
 
         # set all config values
         self.updateConfigurables()
@@ -56,6 +66,17 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
 
 
+## Plottable label container
+class PlotLabel:
+  def __init__(self, name = 'other', startIdx = 0, endIdx = -1):
+    self.name = name
+    self.startIdx = startIdx
+    self.endIdx = endIdx
+    self.linReg = None
+
+  def __str__(self):
+    return str((self.name, self.startIdx, self.endIdx))
+
 
 ## Widget managing plotting
 class GraphicsLayoutWidget:
@@ -65,30 +86,80 @@ class GraphicsLayoutWidget:
         self.w = widget
         self.plots = []
 
-        self.labels = []
+        self.yLabels = [] # names of each sensor dimension
+        self.classLabels = [] # list of plotlabel containers
         self.data = np.zeros((0,0)) # a matrix containing data for each dimension per row
 
 
     def update(self):
-        self.data = self.dataParser.getData()
-        self.updateNumberOfPlots()
+        self.__updateNumberOfPlots()
         for i in range(len(self.plots)):
             self.plots[i].listDataItems()[0].setData(self.data[i,:])
         app.processEvents()  ## force complete redraw for every plot
 
+        self.__updateClassLabels()
+
+
+    ## creates new linearRegion objects if necessary and deletes outdated ones
+    def __updateClassLabels(self):
+        # update class labeling
+        for cl in self.classLabels:
+          # TODO: add clipping here
+          if not cl.linReg:
+            cl.linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
+            cl.linReg.setZValue(-10)
+            for pl in self.plots:
+              pl.addItem(cl.linReg)
+
+
 
     def setYLabels(self, labels):
         self.labels = labels
-        self.updatePlotLabels()
+        self.__updateYLabels()
 
 
-    def setData(self, data):
-        self.data = data
+    ## slot for appending new data
+    @pyqtSlot(tuple)
+    def dataSlot(self, data):
+        ndata = np.array(data[1], ndmin=2).T
+
+        ## check if length of data vector has changed, and pad with zeros if necessary
+        if ndata.shape[0] > self.data.shape[0]:
+            self.data = np.vstack((self.data, np.zeros((ndata.shape[0] - self.data.shape[0], self.data.shape[1]))))
+        elif ndata.shape[0] < self.data.shape[0]:
+            ndata = np.vstack((ndata, np.zeros((self.data.shape[0] - ndata.shape[0], 1))))
+
+        # append
+        self.data = np.hstack((self.data, ndata))
+
+        self.update()
 
 
-    def __updatePlotLabels(self):
+    ## slot for reacting to newly annotated labels
+    @pyqtSlot(tuple)
+    def onNewClassLabel(self, data):
+      # start a new label area or end a started one
+      if data[1]: # label start
+        self.classLabels.append(PlotLabel(data[0], data[2], -1)) # create new label that is open to the right
+
+      else: # label end
+        # find start of label
+        for l in reversed(self.classLabels):
+          if l.name == data[0]: # if same label type
+            l.endIdx = data[2]
+            break
+
+        else:
+          print "Error: ending label failed, no corresponding start"
+
+      for l in self.classLabels:
+        print l
+
+
+
+    def __updateYLabels(self):
         # assign y axis labels (if more/less labels are given, list is truncated accordingly)
-        for p,l in zip(self.plots, self.labels):
+        for p,l in zip(self.plots, self.yLabels):
             p.setLabel('left', l)
 
 
@@ -100,7 +171,7 @@ class GraphicsLayoutWidget:
             self.plots[-1].showGrid(True, True)
             self.w.nextRow()
 
-        self.updatePlotLabels()
+        self.__updateYLabels()
 
 
 
@@ -216,43 +287,47 @@ class ParameterTreeWidget:
 
 
 # Subwindow to add / modify a new label type
-class AddDialog(QtGui.QDialog, dialog_form):
-    ## Constructor
-    def __init__(self, args, parent):
-        QtGui.QDialog.__init__(self,parent)
-        self.setupUi(self)
-        self.parent = parent
+class AddEntryDialog(QtGui.QDialog, dialog_form):
+  ## Constructor
+  def __init__(self, args, parent):
+    QtGui.QDialog.__init__(self,parent)
+    self.setupUi(self)
+    self.parent = parent
 
-        # connect ok / cancel buttons
-        self.buttonBox.accepted.connect(self.__onAccept)
-        self.buttonBox.rejected.connect(self.__onReject)
-
-
-    ## Setter for filling in values when modifying
-    def setValues(self, lm):
-        self.editName.setText(lm.name)
-        self.editKeyMap.setText(lm.key.toString())
-        self.radioToggle.setChecked(lm.toggleMode)
-        self.radioHold.setChecked(not lm.toggleMode)
-        self.editDescription.setText(lm.description)
+    # connect ok / cancel buttons
+    self.buttonBox.accepted.connect(self.__onAccept)
+    self.buttonBox.rejected.connect(self.__onReject)
 
 
-    ## reads out the forms and returns LabelMeta instance
-    def __onAccept(self):
-        self.lm = LabelMeta(self.editName.text(), QtGui.QKeySequence(self.editKeyMap.text()), self.editDescription.toPlainText(), self.radioToggle.isChecked())
-        self.accept()
+  ## Setter for filling in values when modifying
+  def setValues(self, lm):
+    self.editName.setText(lm.name)
+    self.editKeyMap.setText(lm.key.toString())
+    self.radioToggle.setChecked(lm.toggleMode)
+    self.radioHold.setChecked(not lm.toggleMode)
+    self.editDescription.setText(lm.description)
 
 
-    ## just close the window
-    def __onReject(self):
-        self.close()
+  ## reads out the forms and returns LabelMeta instance
+  def __onAccept(self):
+    self.lm = LabelMeta(str(self.editName.text()), QtGui.QKeySequence(self.editKeyMap.text()), str(self.editDescription.toPlainText()), self.radioToggle.isChecked())
+    self.accept()
+
+
+  ## just close the window
+  def __onReject(self):
+    self.close()
 
 
 
 ## Class managing the annotation configuration widget
-class AnnotationConfigWidget:
+class AnnotationConfigWidget(QtCore.QObject):
+#class AnnotationConfigWidget:
+    keyPressSignal = pyqtSignal(tuple)
+
     ## Constructor
     def __init__(self, widget):
+        super(AnnotationConfigWidget, self).__init__()
         # get access to all elements in the annotation config qframe
         self.widget = widget
         self.tableWidget = widget.findChild(QtGui.QTableWidget, "keyTable")
@@ -284,7 +359,8 @@ class AnnotationConfigWidget:
         # clear table and reinsert all items
         self.tableWidget.clearContents()
         self.tableWidget.setRowCount(len(self.annotatorConfig))
-        for i,v in enumerate(self.annotatorConfig.itervalues()):
+        for i,tup in enumerate(self.annotatorConfig.itervalues()):
+            v = tup[0]
             self.tableWidget.setItem(i,0,QtGui.QTableWidgetItem(v.name))
             self.tableWidget.setItem(i,1,QtGui.QTableWidgetItem(v.key.toString()))
             if v.toggleMode:
@@ -298,25 +374,30 @@ class AnnotationConfigWidget:
 
         # update key map
         self.shortcuts = []
-        for v in self.annotatorConfig.itervalues():
-            self.shortcuts.append(QtGui.QShortcut(v.key, self.widget, self.__onShortcutEnable))
+        for v,s in self.annotatorConfig.itervalues():
+            self.shortcuts.append(QtGui.QShortcut(v.key, self.widget, lambda: self.__onShortcutEnable(v.key)))
 
 
-    def __onShortcutEnable(self):
-        # trigger corresponding label
-        print 'shortcut pressed'
-
+    ## pseudo slot for key presses. translates key press into label and status
+    def __onShortcutEnable(self, keySeq):
+        for label, state in self.annotatorConfig.itervalues():
+            if label.key == keySeq:
+                self.annotatorConfig[label.name] = (label, not state)
+                self.keyPressSignal.emit((label.name, not state))
 
 
     def __onAddKey(self):
         # open dialog window
         content = None
-        dialog = AddDialog(args = [], parent=self.widget)
+        dialog = AddEntryDialog(args = [], parent=self.widget)
         dialog.setModal(True)
         if dialog.exec_(): # if dialog closes with accept()
             lm = dialog.lm
             #print lm.name + ' ' + lm.key + ' ' + lm.description + ' ' + str(lm.toggleMode)
-            self.annotatorConfig[lm.name] = lm
+            if self.annotatorConfig.has_key(lm.key):
+              self.annotatorConfig[lm.name] = (lm, self.annotatorConfig[lm.name][1])
+            else:
+              self.annotatorConfig[lm.name] = (lm, False)
             self.syncLists()
 
 
@@ -331,7 +412,7 @@ class AnnotationConfigWidget:
         label = self.tableWidget.item(row,0).text()
         lmOld = self.annotatorConfig[label]
         # open dialog window
-        dialog = AddDialog(args = [], parent=self.widget)
+        dialog = AddEntryDialog(args = [], parent=self.widget)
         dialog.setModal(True)
         dialog.setValues(lmOld)
         if dialog.exec_():
@@ -363,52 +444,63 @@ class LabelMeta:
 
 
 ## A tool for annotating a stream of sensor data with labels
-class Annotator:
-    ## Constructor
-    def __init__(self):
-        self.labelMapping = [] # list of LabelMeta instances
-        self.annotations = [] # list of touples containing label, index, and start/stop flag
+class Annotator(QtCore.QObject):
+  newLabelSignal = pyqtSignal(tuple)
 
-    ## Returns the annotations
-    def getData(self):
-        pass
-
-    ## Returns the key map, the known labels, their description and their toggle mode
-    def getMeta(self):
-        pass
-
-    ## Set the key map, the known labels, their description and their toggle mode
-    def setMeta(self, label, start, count):
-        pass
-
-    ## Filters key press / release events and controls the currrent labeling
-    def processKeyPress(self, key):
-        pass
+  ## Constructor
+  def __init__(self):
+    super(Annotator, self).__init__()
+    self.labelMapping = [] # list of LabelMeta instances
+    self.annotations = [] # list of touples containing label, index, and start/stop flag
+    self.data = np.zeros((0,0))
 
 
-    #def onAddKey(self):
-    #    # get key and class from text forms
-    #    key = self.keyEdit.text()
-    #    cls = self.classEdit.text()
-
-    #    # add it to the dictionary
-    #    self.addKey(key, cls)
-
-    #    # update the table
-    #    self.updateTable()
+  def connectSignals(self, annotatorConfig):
+    # set slot for key presses
+    annotatorConfig.keyPressSignal.connect(self.__onShortcutEnable)
 
 
-    #def updateTable(self):
-    #    self.keyTable.clearContents()
-    #    self.keyTable.setRowCount(len(self.keys))
+  ## Slot for receiving data
+  @pyqtSlot(tuple)
+  def dataSlot(self, data):
+    ndata = np.array(data[1], ndmin=2).T
 
-    #    for kv, i in zip(self.keys.iteritems(), range(len(self.keys))):
-    #        self.keyTable.setItem(i, 0, QtGui.QTableWidgetItem(kv[0]))
+    ## check if length of data vector has changed, and pad with zeros if necessary
+    if ndata.shape[0] > self.data.shape[0]:
+      self.data = np.vstack((self.data, np.zeros((ndata.shape[0] - self.data.shape[0], self.data.shape[1]))))
+    elif ndata.shape[0] < self.data.shape[0]:
+      ndata = np.vstack((ndata, np.zeros((self.data.shape[0] - ndata.shape[0], 1))))
+
+    # append
+    self.data = np.hstack((self.data, ndata))
+
+
+  ## Slot for key presses
+  @pyqtSlot(tuple)
+  def onShortcutEnable(self, data):
+    # trigger corresponding label
+    if self.data.shape[1] != 0:
+      anno = (data[0], data[1], self.data.shape[1])
+      self.annotations.append(anno)
+      self.newLabelSignal.emit(anno)
+      print 'New label: ' + str(anno)
+
+    else:
+      print 'Error: No sensor data!'
+
+
+
+  ## Returns the annotations
+  def getAnnotationData(self):
+      pass
 
 
 
 if __name__ == '__main__':
-    app = QtGui.QApplication(sys.argv)
-    l = LiveAnnotation(sys.argv)
-    l.show()
-    app.exec_()
+  app = QtGui.QApplication(sys.argv)
+  l = LiveAnnotation(sys.argv)
+  l.show()
+  dp.start(100)
+  retVal = app.exec_()
+  dp.stop()
+  sys.exit(retVal)
