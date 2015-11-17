@@ -111,6 +111,11 @@ class GraphicsLayoutWidget:
             for pl in self.plots:
               pl.addItem(cl.linReg)
 
+          # update bounds if necessary
+          if [cl.startIdx, cl.endIdx] != cl.linReg.getRegion():
+              endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
+              cl.linReg.setRegion([cl.startIdx, endIdx])
+
 
 
     def setYLabels(self, labels):
@@ -164,7 +169,7 @@ class GraphicsLayoutWidget:
 
 
     def __updateNumberOfPlots(self):
-        numDims = len(self.data)
+        numDims = self.data.shape[0]
         while len(self.plots) < numDims:
             self.plots.append(self.w.addPlot())
             self.plots[-1].plot()
