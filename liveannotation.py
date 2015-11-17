@@ -84,17 +84,25 @@ class GraphicsLayoutWidget:
     def __init__(self, widget):
         # create plot window
         self.w = widget
+        self.plotIt = self.w.addPlot()
+        self.plotIt.showGrid(True, True)
         self.plots = []
 
         self.yLabels = [] # names of each sensor dimension
         self.classLabels = [] # list of plotlabel containers
         self.data = np.zeros((0,0)) # a matrix containing data for each dimension per row
 
+        # config
+        self.xLimit = 500
+
 
     def update(self):
+        if self.xLimit > 0 and self.data.shape[1] > self.xLimit:
+            self.plotIt.setXRange(self.data.shape[1] - self.xLimit, self.data.shape[1])
         self.__updateNumberOfPlots()
-        for i in range(len(self.plots)):
-            self.plots[i].listDataItems()[0].setData(self.data[i,:])
+        for i,pl in enumerate(self.plotIt.listDataItems()):
+            pl.setData(self.data[i,:])
+
         app.processEvents()  ## force complete redraw for every plot
 
         self.__updateClassLabels()
@@ -108,8 +116,9 @@ class GraphicsLayoutWidget:
           if not cl.linReg:
             cl.linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
             cl.linReg.setZValue(-10)
-            for pl in self.plots:
-              pl.addItem(cl.linReg)
+            #for pl in self.plots:
+            #  pl.addItem(cl.linReg)
+            self.plotIt.addItem(cl.linReg)
 
           # update bounds if necessary
           if [cl.startIdx, cl.endIdx] != cl.linReg.getRegion():
@@ -170,11 +179,14 @@ class GraphicsLayoutWidget:
 
     def __updateNumberOfPlots(self):
         numDims = self.data.shape[0]
+
+        for pl in self.plotIt.listDataItems():
+            self.plotIt.removeItem(pl)
+
+        self.plots = []
+
         while len(self.plots) < numDims:
-            self.plots.append(self.w.addPlot())
-            self.plots[-1].plot()
-            self.plots[-1].showGrid(True, True)
-            self.w.nextRow()
+            self.plots.append(self.plotIt.plot())
 
         self.__updateYLabels()
 
