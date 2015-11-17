@@ -5,7 +5,14 @@ class Signal(QtCore.QObject):
     newData = QtCore.pyqtSignal(tuple)
 
 signal = Signal()
-source = sys.stdin
+source = None
+fromFile = False
+if len(sys.argv) > 1:
+    print 'Reading sensor data from file.'
+    source = open(sys.argv[1], 'r')
+    fromFile = True
+else:
+    source = sys.stdin
 timer = None
 
 
@@ -25,7 +32,7 @@ def stop():
 # get all available data from the source and emit signals
 def processData():
     # get data
-    while select.select([sys.stdin], [], [], 0)[0]:
+    while fromFile or select.select([sys.stdin], [], [], 0)[0]:
         line = source.readline()
         if line:
             # read space separated data fields

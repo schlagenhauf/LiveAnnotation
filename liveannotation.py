@@ -72,7 +72,7 @@ class PlotLabel:
     self.name = name
     self.startIdx = startIdx
     self.endIdx = endIdx
-    self.linReg = None
+    self.linReg = []
 
   def __str__(self):
     return str((self.name, self.startIdx, self.endIdx))
@@ -90,11 +90,23 @@ class GraphicsLayoutWidget:
         self.classLabels = [] # list of plotlabel containers
         self.data = np.zeros((0,0)) # a matrix containing data for each dimension per row
 
+        self.statusLabel = self.w.parent().findChild(QtGui.QLabel, "labelPlotStatus")
+
+        # config
+        self.xLimit = 300
+        self.rate = 50
+
 
     def update(self):
+        numSamples = self.data.shape[1]
+
         self.__updateNumberOfPlots()
-        for i in range(len(self.plots)):
-            self.plots[i].listDataItems()[0].setData(self.data[i,:])
+
+        for i,pl in enumerate(self.plots):
+            pl.listDataItems()[0].setData(self.data[i,:])
+            if self.xLimit < numSamples:
+                pl.setXRange(numSamples - self.xLimit, numSamples)
+
         app.processEvents()  ## force complete redraw for every plot
 
         self.__updateClassLabels()
@@ -104,17 +116,27 @@ class GraphicsLayoutWidget:
     def __updateClassLabels(self):
         # update class labeling
         for cl in self.classLabels:
-          # TODO: add clipping here
           if not cl.linReg:
-            cl.linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
-            cl.linReg.setZValue(-10)
             for pl in self.plots:
-              pl.addItem(cl.linReg)
+              linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
+              linReg.setZValue(-10)
+              pl.addItem(linReg)
+              cl.linReg.append(linReg)
 
           # update bounds if necessary
-          if [cl.startIdx, cl.endIdx] != cl.linReg.getRegion():
+          if [cl.startIdx, cl.endIdx] != cl.linReg[0].getRegion():
               endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
-              cl.linReg.setRegion([cl.startIdx, endIdx])
+              for lr in cl.linReg:
+                  lr.setRegion([cl.startIdx, endIdx])
+
+        self.__setStatusLabel()
+
+
+
+    def __setStatusLabel(self):
+        numSamples = self.data.shape[1]
+        visibleSamples = self.xLimit if numSamples > self.xLimit else numSamples
+        self.statusLabel.setText('Samples: ' + str(numSamples) + ' [' + str(visibleSamples) + ' visible]')
 
 
 
@@ -250,9 +272,20 @@ class ParameterTreeWidget:
         defaultParams = [
             {'name': 'General', 'type': 'group', 'children': [
                 {'name': 'Config Path', 'type': 'str', 'value': "config.cfg"},
+                {'name': 'Save Key Maps', 'type': 'bool', 'value': True},
+                {'name': 'Key Map Save File', 'type': 'str', 'value': "keymap.cfg"},
+                {'name': 'Data Output Target', 'type': 'list', 'values': {"File": "file", "Standard Output": "stdout"}, 'value': "Standard Output"},
+                {'name': 'Data Output Filename', 'type': 'str', 'value': "annotated_data.txt"},
             ]},
             {'name': 'Video', 'type': 'group', 'children': [
-                {'name': 'Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "Test Source"},
+                {'name': 'Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "Test Source", 'children': [
+                {'name': 'Network Source IP', 'type': 'str', 'value': "127.0.0.1"},
+                ]},
+                {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+            ]},
+            {'name': 'Annotation', 'type': 'group', 'children': [
+                {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Displayed Samples (0 for all)', 'type': 'int', 'value': 500},
             ]},
         ]
 
@@ -458,6 +491,7 @@ class Annotator(QtCore.QObject):
     self.labelMapping = [] # list of LabelMeta instances
     self.annotations = [] # list of touples containing label, index, and start/stop flag
     self.data = np.zeros((0,0))
+    self.writeCursor = 0
 
 
   def connectSignals(self, annotatorConfig):
@@ -494,10 +528,13 @@ class Annotator(QtCore.QObject):
       print 'Error: No sensor data!'
 
 
+  def writeAnnotatedData(self):
+      for i in range(self.writeCursor, self.data.shape[1]):
+          pass
+          # compose line
 
-  ## Returns the annotations
-  def getAnnotationData(self):
-      pass
+
+
 
 
 
