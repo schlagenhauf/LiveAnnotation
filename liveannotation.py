@@ -39,15 +39,12 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
 
         # create all modules
         self.config = ParameterTreeWidget(self.parameterView)
-        self.stream = VideoWidget(self.videoView.winId())
+        self.stream = VideoWidget(self.videoView)
         self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
         self.annotatorConfig = AnnotationConfigWidget(self.frameKeys)
         self.annotator = Annotator()
 
         # connect elements
-        self.btnPlay.clicked.connect(self.stream.play)
-        self.btnPause.clicked.connect(self.stream.pause)
-
         self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
         self.annotatorConfig.keyPressSignal.connect(self.annotator.onShortcutEnable)
 
@@ -204,64 +201,87 @@ class GraphicsLayoutWidget:
 
 ## Widget managing video stream
 class VideoWidget:
-    ## Constructor
-    def __init__(self, winId):
-        assert winId
-        self.winId = winId
+  ## Constructor
+  def __init__(self, widget):
+    self.widget = widget
+    self.widget.parent().findChild(QtGui.QPushButton, "btnRec").clicked.connect(self.__onRec)
+    self.widget.parent().findChild(QtGui.QPushButton, "btnPlay").clicked.connect(self.__onPlay)
+    self.widget.parent().findChild(QtGui.QPushButton, "btnPause").clicked.connect(self.__onPause)
+    self.isRunning = False
+    self.isRecording = False
+    self.fileOutPath = ""
 
 
-    def play(self):
-        self.pipeline.set_state(gst.STATE_PLAYING)
+  def __onPlay(self):
+    if not self.isRunning:
+      self.pipeline.set_state(gst.STATE_PLAYING)
 
 
-    def pause(self):
-        self.pipeline.set_state(gst.STATE_NULL)
+  def __onPause(self):
+    if self.isRunning:
+      self.pipeline.set_state(gst.STATE_NULL)
+
+  def __onRec(self):
+    if not self.isRecording:
+      self.__startRecording()
+      self.isRecording = True
+    else:
+      self.__stopRecording()
+      self.isRecording = False
 
 
-    def startRecording(self, path):
-        # enable pipeline output to file
-        pass
+  def __startRecording(self):
+    # enable pipeline output to file
+    print "Start rec"
 
 
-    def stopRecording(self):
-        pass
+  def __stopRecording(self):
+    print "Stop rec"
 
 
-    def updatePipeline(self, source):
-        # create pipeline, source and sink
-        self.pipeline = gst.Pipeline("videopl")
-        self.source = gst.element_factory_make(source, "vsource")
-        self.sink = gst.element_factory_make("autovideosink", "outsink")
+  def updatePipeline(self, source):
+    # create trunk pipeline, source and tee
+    self.pipelineTrunk = gst.Pipeline("videopl")
+    self.source = gst.element_factory_make(source, "vsource")
+    self.tee = gst.element_factory_make("tee", "streamtee")
+    self.pipelineTrunk.add(self.source, self.tee)
+    gst.element_link_many(self.source, self.tee)
 
-        # connect them
-        self.pipeline.add(self.source, self.sink)
-        gst.element_link_many(self.source, self.sink)
-
-        # intercept all bus messages so we can grab the frame
-        bus = self.pipeline.get_bus()
-        bus.add_signal_watch()
-        bus.enable_sync_message_emission()
-        bus.connect("message", self.__onMessage)
-        bus.connect("sync-message::element", self.__onSyncMessage)
+    #self.sink = gst.element_factory_make("autovideosink", "outsink")
+    self.sink = gst.element_factory_make("filesink", "fsink")
+    self.sink.set_property('location', r'/home/pheenx/tmp/outvideo')
+    self.sink.set_property('sync', 'false')
 
 
-    def __onMessage(self, bus, message):
-        t = message.type
-        if t == gst.MESSAGE_EOS:
-            self.player.set_state(gst.STATE_NULL)
-        elif t == gst.MESSAGE_ERROR:
-           err, debug = message.parse_error()
-           print "Error: %s" % err, debug
-           self.player.set_state(gst.STATE_NULL)
+    # connect them
+    self.pipeline.add(self.source, self.sink)
+    gst.element_link_many(self.source, self.sink)
 
-    def __onSyncMessage(self, bus, message):
-        if message.structure is None:
-            return
-        message_name = message.structure.get_name()
-        if message_name == "prepare-xwindow-id":
-            imagesink = message.src
-            imagesink.set_property("force-aspect-ratio", True)
-            imagesink.set_xwindow_id(self.winId)
+    # intercept all bus messages so we can grab the frame
+    bus = self.pipeline.get_bus()
+    bus.add_signal_watch()
+    bus.enable_sync_message_emission()
+    bus.connect("message", self.__onMessage)
+    bus.connect("sync-message::element", self.__onSyncMessage)
+
+
+  def __onMessage(self, bus, message):
+    t = message.type
+    if t == gst.MESSAGE_EOS:
+      self.player.set_state(gst.STATE_NULL)
+    elif t == gst.MESSAGE_ERROR:
+      err, debug = message.parse_error()
+      print "Error: %s" % err, debug
+      self.player.set_state(gst.STATE_NULL)
+
+  def __onSyncMessage(self, bus, message):
+    if message.structure is None:
+      return
+    message_name = message.structure.get_name()
+    if message_name == "prepare-xwindow-id":
+      imagesink = message.src
+      imagesink.set_property("force-aspect-ratio", True)
+      imagesink.set_xwindow_id(self.widget.winId())
 
 
 
@@ -344,6 +364,7 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
     self.radioToggle.setChecked(lm.toggleMode)
     self.radioHold.setChecked(not lm.toggleMode)
     self.editDescription.setText(lm.description)
+
 
 
   ## reads out the forms and returns LabelMeta instance
@@ -532,9 +553,6 @@ class Annotator(QtCore.QObject):
       for i in range(self.writeCursor, self.data.shape[1]):
           pass
           # compose line
-
-
-
 
 
 
