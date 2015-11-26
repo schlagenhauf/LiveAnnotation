@@ -32,35 +32,40 @@ dialog_form = uic.loadUiType("ad.ui")[0]
 
 ## Top level class for main window and module instances
 class LiveAnnotation(QtGui.QMainWindow, main_form):
-    ## Constructor
-    def __init__(self, args, parent=None):
-        QtGui.QMainWindow.__init__(self,parent)
-        self.setupUi(self)
+  ## Constructor
+  def __init__(self, args, parent=None):
+    QtGui.QMainWindow.__init__(self,parent)
+    self.setupUi(self)
 
-        # create all modules
-        self.config = ParameterTreeWidget(self.parameterView)
-        self.stream = VideoWidget(self.videoView)
-        self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
-        self.annotatorConfig = AnnotationConfigWidget(self.frameKeys)
-        self.annotator = Annotator()
+    # create all modules
+    self.config = ParameterTreeWidget(self.parameterView)
+    self.stream = VideoWidget(self.videoView)
+    #self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
+    self.annotatorConfig = AnnotationConfigWidget(self.frameKeys)
+    self.annotator = Annotator()
 
-        # connect elements
-        self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
-        self.annotatorConfig.keyPressSignal.connect(self.annotator.onShortcutEnable)
+    # connect elements
+    #self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
+    self.annotatorConfig.keyPressSignal.connect(self.annotator.onShortcutEnable)
 
-        dp.connect(self.plotter.dataSlot)
-        dp.connect(self.annotator.dataSlot)
+    dp.start(1000 / 50)
+    dp.connect(self.plotter.dataSlot)
+    dp.connect(self.annotator.dataSlot)
 
-        # set all config values
-        self.updateConfigurables()
+    # set all config values
+    self.updateConfigurables()
 
 
+  def __del__(self):
+    dp.stop()
 
-    ## Sets all config values again (e.g. after changing the config)
-    # only use getConfigValue here, to ensure that all values are updated
-    def updateConfigurables(self):
-        # video config
-        self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
+
+  ## Sets all config values again (e.g. after changing the config)
+  # only use getConfigValue here, to ensure that all values are updated
+  def updateConfigurables(self):
+    # video config
+    self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
+
 
 
 ## Plottable label container
@@ -104,9 +109,9 @@ class GraphicsLayoutWidget:
             if self.xLimit < numSamples:
                 pl.setXRange(numSamples - self.xLimit, numSamples)
 
-        app.processEvents()  ## force complete redraw for every plot
-
         self.__updateClassLabels()
+
+        app.processEvents()  ## force complete redraw for every plot
 
 
     ## creates new linearRegion objects if necessary and deletes outdated ones
@@ -254,11 +259,11 @@ class VideoWidget:
 
 
     # connect them
-    self.pipeline.add(self.source, self.sink)
-    gst.element_link_many(self.source, self.sink)
+    #self.pipelineTrunk.add(self.source, self.sink)
+    #gst.element_link_many(self.source, self.sink)
 
     # intercept all bus messages so we can grab the frame
-    bus = self.pipeline.get_bus()
+    bus = self.pipelineTrunk.get_bus()
     bus.add_signal_watch()
     bus.enable_sync_message_emission()
     bus.connect("message", self.__onMessage)
@@ -352,7 +357,10 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
     self.setupUi(self)
     self.parent = parent
 
+    self.listenForKeyPress = False
+
     # connect ok / cancel buttons
+    self.btnRecShortcut.released.connect(self.__onRecKey)
     self.buttonBox.accepted.connect(self.__onAccept)
     self.buttonBox.rejected.connect(self.__onReject)
 
@@ -364,6 +372,29 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
     self.radioToggle.setChecked(lm.toggleMode)
     self.radioHold.setChecked(not lm.toggleMode)
     self.editDescription.setText(lm.description)
+
+
+  ## Records a modifier + key shortcut
+  def __onRecKey(self):
+    # prompt the user to enter a shortcut
+    self.editKeyMap.setText("Press key...")
+
+    # enable keypress event listener
+    self.listenForKeyPress = True
+
+  def keyPressEvent(self, e):
+    if self.listenForKeyPress and e.key() not in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Alt, QtCore.Qt.Key_Shift):
+      modifiers = QtGui.QApplication.keyboardModifiers()
+      keyMods = ''
+      if modifiers & QtCore.Qt.ControlModifier: keyMods += 'Ctrl+'
+      if modifiers & QtCore.Qt.AltModifier: keyMods += 'Alt+'
+      if modifiers & QtCore.Qt.ShiftModifier: keyMods += 'Shift+'
+      keySeq = QtGui.QKeySequence(e.key())
+      keySeq = QtGui.QKeySequence(keyMods + keySeq.toString())
+
+      self.editKeyMap.setText(keySeq.toString())
+
+      self.listenForKeyPress = False
 
 
 
@@ -512,7 +543,12 @@ class Annotator(QtCore.QObject):
     self.labelMapping = [] # list of LabelMeta instances
     self.annotations = [] # list of touples containing label, index, and start/stop flag
     self.data = np.zeros((0,0))
-    self.writeCursor = 0
+    self.outFilePath = 'annotationOut.txt'
+
+
+  def __del__(self):
+    # write annotation data
+    self.writeAnnotatedData()
 
 
   def connectSignals(self, annotatorConfig):
@@ -533,6 +569,7 @@ class Annotator(QtCore.QObject):
 
     # append
     self.data = np.hstack((self.data, ndata))
+    print "annotator data slot reached"
 
 
   ## Slot for key presses
@@ -550,9 +587,29 @@ class Annotator(QtCore.QObject):
 
 
   def writeAnnotatedData(self):
-      for i in range(self.writeCursor, self.data.shape[1]):
-          pass
-          # compose line
+    print "annotation is written"
+    if not self.annotations:
+        return
+
+    # create "empty" labels
+    outLabels = ["other" for i in range(self.data.shape[1])]
+
+    # apply annotation
+    for a in self.annotations:
+      for i in range(a.startIdx, a.endIdx):
+        outLabels[i] = a.name
+
+    # create final output data
+    outData = ""
+    for i in range(self.data.shape[1]):
+        nums = self.data[:,i].tolist()
+        outData += outLabels[i] + ' ' + ' '.join(nums) + '\n'
+
+    # open file and write
+    outFile = open(self.outFilePath, 'w')
+    outFile.write(outData)
+    outFile.close()
+
 
 
 
@@ -560,7 +617,7 @@ if __name__ == '__main__':
   app = QtGui.QApplication(sys.argv)
   l = LiveAnnotation(sys.argv)
   l.show()
-  dp.start(100)
+  dp.start(1000 / 50)
   retVal = app.exec_()
   dp.stop()
   sys.exit(retVal)
