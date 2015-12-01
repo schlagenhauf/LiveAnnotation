@@ -45,8 +45,9 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
     self.annotator = Annotator()
 
     # connect elements
-    self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
+    #self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
     self.annotatorConfig.keyPressSignal.connect(self.annotator.onShortcutEnable)
+    self.annotatorConfig.keyPressSignal.connect(self.plotter.onShortcutEnable)
 
     dp.start(1000 / 50)
     dp.connect(self.plotter.dataSlot)
@@ -75,15 +76,21 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
 
 
 ## Plottable label container
-class PlotLabel:
+class Label:
   def __init__(self, name = 'other', startIdx = 0, endIdx = -1):
     self.name = name
     self.startIdx = startIdx
     self.endIdx = endIdx
-    self.linReg = []
 
   def __str__(self):
     return str((self.name, self.startIdx, self.endIdx))
+
+
+class PlotLabel(Label):
+  def __init__(self, name = 'other', startIdx = 0, endIdx = -1):
+    Label.__init__(self, name, startIdx, endIdx)
+    self.linReg = []
+
 
 
 
@@ -95,7 +102,7 @@ class GraphicsLayoutWidget:
     self.w = widget
 
     self.yLabels = [] # names of each sensor dimension
-    self.classLabels = [] # list of plotlabel containers
+    self.annotations = [] # list of plotlabel containers
     self.data = np.zeros((0,0)) # a matrix containing data for each dimension per row
 
     self.statusLabel = self.w.parent().findChild(QtGui.QLabel, "labelPlotStatus")
@@ -119,16 +126,16 @@ class GraphicsLayoutWidget:
 
     app.processEvents()  ## force complete redraw for every plot
 
+
   def quit(self):
     for p in self.plots:
       self.w.removeItem(p)
 
 
-
   ## creates new linearRegion objects if necessary and deletes outdated ones
   def __updateClassLabels(self):
     # update class labeling
-      for cl in self.classLabels:
+      for cl in self.annotations:
         if not cl.linReg:
           for pl in self.plots:
             linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
@@ -145,12 +152,10 @@ class GraphicsLayoutWidget:
       self.__setStatusLabel()
 
 
-
   def __setStatusLabel(self):
     numSamples = self.data.shape[1]
     visibleSamples = self.xLimit if numSamples > self.xLimit else numSamples
     self.statusLabel.setText('Samples: ' + str(numSamples) + ' [' + str(visibleSamples) + ' visible]')
-
 
 
   def setYLabels(self, labels):
@@ -176,21 +181,30 @@ class GraphicsLayoutWidget:
 
 
   ## slot for reacting to newly annotated labels
-  @pyqtSlot(tuple) # tuple = (name, start or end, index)
-  def onNewClassLabel(self, data):
+  @pyqtSlot(tuple)
+  def onShortcutEnable(self, data):
+    numSamples = self.data.shape[1]
+
+    # trigger corresponding label
+    if numSamples == 0:
+      print 'Error: No sensor data!'
+      return
+
+
     # start a new label area or end a started one
     if data[1]: # label start
-      self.classLabels.append(PlotLabel(data[0], data[2], -1)) # create new label that is open to the right
+      self.annotations.append(PlotLabel(data[0], numSamples, -1)) # create new label that is open to the right
 
     else: # label end
       # find start of label
-      for l in reversed(self.classLabels):
+      for l in reversed(self.annotations):
         if l.name == data[0]: # if same label type
-          l.endIdx = data[2]
+          l.endIdx = numSamples
           break
 
       else:
         print "Error: ending label failed, no corresponding start"
+
 
 
   def __updateYLabels(self):
@@ -485,7 +499,7 @@ class AnnotationConfigWidget(QtCore.QObject):
         for label, state in self.annotatorConfig.itervalues():
             if label.key == keySeq:
                 self.annotatorConfig[label.name] = (label, not state)
-                self.keyPressSignal.emit((label.name, not state))
+                self.keyPressSignal.emit((label.name, state))
 
 
     def __onAddKey(self):
@@ -544,15 +558,6 @@ class LabelMeta:
     self.toggleMode = toggleMode
 
 
-## Container for actual labels
-class Label:
-  ## Constructor
-  def __init__(self, name = "", startIdx = 0, endIdx = -1):
-    self.name = name
-    self.startIdx = startIdx
-    self.endIdx = endIdx
-
-
 ## A tool for annotating a stream of sensor data with labels
 class Annotator(QtCore.QObject):
   newLabelSignal = pyqtSignal(tuple)
@@ -589,32 +594,32 @@ class Annotator(QtCore.QObject):
   ## Slot for key presses
   @pyqtSlot(tuple) # tuple = (name, on / off)
   def onShortcutEnable(self, data):
+    numSamples = self.data.shape[1]
+
     # trigger corresponding label
-    if self.data.shape[1] == 0:
+    if numSamples == 0:
       print 'Error: No sensor data!'
       return
 
-    # if it is an closing edge, find the corresponding start
-
-    anno = (data[0], data[1], self.data.shape[1])
-    self.annotations.append(anno)
-    self.newLabelSignal.emit(anno) # tuple = (name, start or end, index)
-    print 'New label: ' + str(anno)
 
     # start a new label area or end a started one
     if data[1]: # label start
-      self.annotations.append(PlotLabel(data[0], data[2], -1)) # create new label that is open to the right
+      self.annotations.append(Label(data[0], numSamples, -1)) # create new label that is open to the right
 
     else: # label end
       # find start of label
-      for l in reversed(self.classLabels):
+      for l in reversed(self.annotations):
         if l.name == data[0]: # if same label type
-          l.endIdx = data[2]
+          l.endIdx = numSamples
           break
 
       else:
-        print "Error: ending label failed, no corresponding start"
+        print "Error: ending label failed, no corresponding start (annotator)"
 
+    #self.newLabelSignal.emit((self.annotations[-1].name) # tuple = (name, start or end, index)
+
+    print "num annots: " + str(len(self.annotations)) + " , tuple: " + str(data)
+    print 'New label: ' + str(self.annotations[-1])
 
 
 
@@ -630,14 +635,14 @@ class Annotator(QtCore.QObject):
 
     # apply annotation
     for a in self.annotations:
-      for i in range(a[1], a[2]):
-        outLabels[i] = a[0]
+      for i in range(a.startIdx, a.endIdx):
+        outLabels[i] = a.name
 
     # create final output data
     outData = ""
     for i in range(self.data.shape[1]):
       nums = self.data[:,i].tolist()
-      outData += outLabels[i] + ' ' + ' '.join(nums) + '\n'
+      outData += outLabels[i] + ' ' + ' '.join(map(str, nums)) + '\n'
 
     print "numData: " + str(self.data.shape[1]) + "lenOutData: " + str(len(outData))
 
@@ -653,7 +658,5 @@ if __name__ == '__main__':
   app = QtGui.QApplication(sys.argv)
   l = LiveAnnotation(sys.argv)
   l.show()
-  dp.start(1000 / 50)
   retVal = app.exec_()
-  dp.stop()
   sys.exit(retVal)
