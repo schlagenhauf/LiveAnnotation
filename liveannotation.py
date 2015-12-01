@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import sys
+import sys, pickle
 from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtCore import pyqtSlot, pyqtSignal
 from pyqtgraph.parametertree import Parameter
@@ -40,12 +40,12 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
     # create all modules
     self.config = ParameterTreeWidget(self.parameterView)
     self.stream = VideoWidget(self.videoView)
-    #self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
+    self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
     self.annotatorConfig = AnnotationConfigWidget(self.frameKeys)
     self.annotator = Annotator()
 
     # connect elements
-    #self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
+    self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
     self.annotatorConfig.keyPressSignal.connect(self.annotator.onShortcutEnable)
 
     dp.start(1000 / 50)
@@ -56,14 +56,19 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
     self.updateConfigurables()
 
 
-  def __del__(self):
+  def closeEvent(self, event):
     dp.stop()
+    self.annotatorConfig.quit()
+    self.plotter.quit()
+
+    event.accept()
 
 
   ## Sets all config values again (e.g. after changing the config)
   # only use getConfigValue here, to ensure that all values are updated
   def updateConfigurables(self):
     # video config
+    print self.config.getConfigValue('Video Source')
     self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
 
 
@@ -80,11 +85,12 @@ class PlotLabel:
     return str((self.name, self.startIdx, self.endIdx))
 
 
+
 ## Widget managing plotting
 class GraphicsLayoutWidget:
-    ## Constructor
+  ## Constructor
     def __init__(self, widget):
-        # create plot window
+      # create plot window
         self.w = widget
         self.plots = []
 
@@ -100,23 +106,29 @@ class GraphicsLayoutWidget:
 
 
     def update(self):
-        numSamples = self.data.shape[1]
+      numSamples = self.data.shape[1]
 
-        self.__updateNumberOfPlots()
+      self.__updateNumberOfPlots()
 
-        for i,pl in enumerate(self.plots):
-            pl.listDataItems()[0].setData(self.data[i,:])
-            if self.xLimit < numSamples:
-                pl.setXRange(numSamples - self.xLimit, numSamples)
+      for i,pl in enumerate(self.plots):
+        pl.listDataItems()[0].setData(self.data[i,:])
+        if self.xLimit < numSamples:
+          pl.setXRange(numSamples - self.xLimit, numSamples)
 
-        self.__updateClassLabels()
+      self.__updateClassLabels()
 
-        app.processEvents()  ## force complete redraw for every plot
+      app.processEvents()  ## force complete redraw for every plot
+
+
+    def quit(self):
+      for p in self.plots:
+        self.w.removeItem(p)
+
 
 
     ## creates new linearRegion objects if necessary and deletes outdated ones
     def __updateClassLabels(self):
-        # update class labeling
+      # update class labeling
         for cl in self.classLabels:
           if not cl.linReg:
             for pl in self.plots:
@@ -127,41 +139,41 @@ class GraphicsLayoutWidget:
 
           # update bounds if necessary
           if [cl.startIdx, cl.endIdx] != cl.linReg[0].getRegion():
-              endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
-              for lr in cl.linReg:
-                  lr.setRegion([cl.startIdx, endIdx])
+            endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
+            for lr in cl.linReg:
+              lr.setRegion([cl.startIdx, endIdx])
 
         self.__setStatusLabel()
 
 
 
     def __setStatusLabel(self):
-        numSamples = self.data.shape[1]
-        visibleSamples = self.xLimit if numSamples > self.xLimit else numSamples
-        self.statusLabel.setText('Samples: ' + str(numSamples) + ' [' + str(visibleSamples) + ' visible]')
+      numSamples = self.data.shape[1]
+      visibleSamples = self.xLimit if numSamples > self.xLimit else numSamples
+      self.statusLabel.setText('Samples: ' + str(numSamples) + ' [' + str(visibleSamples) + ' visible]')
 
 
 
     def setYLabels(self, labels):
-        self.labels = labels
-        self.__updateYLabels()
+      self.labels = labels
+      self.__updateYLabels()
 
 
     ## slot for appending new data
     @pyqtSlot(tuple)
     def dataSlot(self, data):
-        ndata = np.array(data[1], ndmin=2).T
+      ndata = np.array(data[1], ndmin=2).T
 
-        ## check if length of data vector has changed, and pad with zeros if necessary
-        if ndata.shape[0] > self.data.shape[0]:
-            self.data = np.vstack((self.data, np.zeros((ndata.shape[0] - self.data.shape[0], self.data.shape[1]))))
-        elif ndata.shape[0] < self.data.shape[0]:
-            ndata = np.vstack((ndata, np.zeros((self.data.shape[0] - ndata.shape[0], 1))))
+      ## check if length of data vector has changed, and pad with zeros if necessary
+      if ndata.shape[0] > self.data.shape[0]:
+        self.data = np.vstack((self.data, np.zeros((ndata.shape[0] - self.data.shape[0], self.data.shape[1]))))
+      elif ndata.shape[0] < self.data.shape[0]:
+        ndata = np.vstack((ndata, np.zeros((self.data.shape[0] - ndata.shape[0], 1))))
 
-        # append
-        self.data = np.hstack((self.data, ndata))
+      # append
+      self.data = np.hstack((self.data, ndata))
 
-        self.update()
+      self.update()
 
 
     ## slot for reacting to newly annotated labels
@@ -187,20 +199,20 @@ class GraphicsLayoutWidget:
 
 
     def __updateYLabels(self):
-        # assign y axis labels (if more/less labels are given, list is truncated accordingly)
+      # assign y axis labels (if more/less labels are given, list is truncated accordingly)
         for p,l in zip(self.plots, self.yLabels):
-            p.setLabel('left', l)
+          p.setLabel('left', l)
 
 
     def __updateNumberOfPlots(self):
-        numDims = self.data.shape[0]
-        while len(self.plots) < numDims:
-            self.plots.append(self.w.addPlot())
-            self.plots[-1].plot()
-            self.plots[-1].showGrid(True, True)
-            self.w.nextRow()
+      numDims = self.data.shape[0]
+      while len(self.plots) < numDims:
+        self.plots.append(self.w.addPlot())
+        self.plots[-1].plot()
+        self.plots[-1].showGrid(True, True)
+        self.w.nextRow()
 
-        self.__updateYLabels()
+      self.__updateYLabels()
 
 
 
@@ -292,60 +304,61 @@ class VideoWidget:
 
 ## Widget populating and reading configuration
 class ParameterTreeWidget:
-    ## Constructor
-    def __init__(self, parameterView):
-        defaultParams = [
-            {'name': 'General', 'type': 'group', 'children': [
-                {'name': 'Config Path', 'type': 'str', 'value': "config.cfg"},
-                {'name': 'Save Key Maps', 'type': 'bool', 'value': True},
-                {'name': 'Key Map Save File', 'type': 'str', 'value': "keymap.cfg"},
-                {'name': 'Data Output Target', 'type': 'list', 'values': {"File": "file", "Standard Output": "stdout"}, 'value': "Standard Output"},
-                {'name': 'Data Output Filename', 'type': 'str', 'value': "annotated_data.txt"},
-            ]},
-            {'name': 'Video', 'type': 'group', 'children': [
-                {'name': 'Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "Test Source", 'children': [
-                {'name': 'Network Source IP', 'type': 'str', 'value': "127.0.0.1"},
-                ]},
-                {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
-            ]},
-            {'name': 'Annotation', 'type': 'group', 'children': [
-                {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
-                {'name': 'Displayed Samples (0 for all)', 'type': 'int', 'value': 500},
-            ]},
-        ]
+  ## Constructor
+  def __init__(self, parameterView):
+    defaultParams = [
+      {'name': 'General', 'type': 'group', 'children': [
+        {'name': 'Config Path', 'type': 'str', 'value': "config.cfg"},
+        {'name': 'Save Key Maps', 'type': 'bool', 'value': True},
+        {'name': 'Key Map Save File', 'type': 'str', 'value': "keymap.cfg"},
+        {'name': 'Data Output Target', 'type': 'list', 'values': {"File": "file", "Standard Output": "stdout"}, 'value': "Standard Output"},
+        {'name': 'Data Output Filename', 'type': 'str', 'value': "annotated_data.txt"},
+      ]},
+      {'name': 'Video', 'type': 'group', 'children': [
+        {'name': 'Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "Test Source", 'children': [
+          {'name': 'Network Source IP', 'type': 'str', 'value': "127.0.0.1"},
+          ]},
+        {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+        ]},
+      {'name': 'Annotation', 'type': 'group', 'children': [
+        {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+        {'name': 'Displayed Samples (0 for all)', 'type': 'int', 'value': 500},
+      ]},
+    ]
 
-        self.p = Parameter.create(name='params', type='group', children=defaultParams)
-
-
-        self.t = parameterView # use the ID of the promoted graphicsView
-        self.t.setParameters(self.p, showTop=False)
-        self.t.show()
+    self.p = Parameter.create(name='params', type='group', children=defaultParams)
 
 
-    ## recursively go through the tree and search for a parameter with <key>
-    # returns None if no fitting value was found
-    def getConfigValue(self, key, tree = None):
-        if tree is None:
-            tree = self.p
-
-        for ch in tree.children():
-            if ch.name() == key:
-                return ch.value()
-            else:
-                cv = self.getConfigValue(key, ch)
-                if cv is not None:
-                    return cv
-
-        return None
+    self.t = parameterView # use the ID of the promoted graphicsView
+    self.t.setParameters(self.p, showTop=False)
+    self.t.show()
+    print "bla"
 
 
-    def save(self):
-        self.state = self.p.saveState()
+  ## recursively go through the tree and search for a parameter with <key>
+  # returns None if no fitting value was found
+  def getConfigValue(self, key, tree = None):
+    if tree is None:
+      tree = self.p
 
-    def restore(self):
-        add = self.p['Save/Restore functionality', 'Restore State', 'Add missing items']
-        rem = self.p['Save/Restore functionality', 'Restore State', 'Remove extra items']
-        self.p.restoreState(self.state, addChildren=add, removeChildren=rem)
+    for ch in tree.children():
+      if ch.name() == key:
+        return ch.value()
+      else:
+        cv = self.getConfigValue(key, ch)
+        if cv is not None:
+          return cv
+
+    return None
+
+
+  def save(self):
+    self.state = self.p.saveState()
+
+  def restore(self):
+    add = self.p['Save/Restore functionality', 'Restore State', 'Add missing items']
+    rem = self.p['Save/Restore functionality', 'Restore State', 'Remove extra items']
+    self.p.restoreState(self.state, addChildren=add, removeChildren=rem)
 
 
 
@@ -412,37 +425,52 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
 
 ## Class managing the annotation configuration widget
 class AnnotationConfigWidget(QtCore.QObject):
-#class AnnotationConfigWidget:
+  #class AnnotationConfigWidget:
     keyPressSignal = pyqtSignal(tuple)
 
     ## Constructor
     def __init__(self, widget):
-        super(AnnotationConfigWidget, self).__init__()
-        # get access to all elements in the annotation config qframe
-        self.widget = widget
-        self.tableWidget = widget.findChild(QtGui.QTableWidget, "keyTable")
-        widget.findChild(QtGui.QPushButton, "btnAddKey").clicked.connect(self.__onAddKey)
-        widget.findChild(QtGui.QPushButton, "btnModKey").clicked.connect(self.__onModKey)
-        widget.findChild(QtGui.QPushButton, "btnDelKey").clicked.connect(self.__onDelKey)
+      super(AnnotationConfigWidget, self).__init__()
+      # get access to all elements in the annotation config qframe
+      self.widget = widget
+      self.tableWidget = widget.findChild(QtGui.QTableWidget, "keyTable")
+      widget.findChild(QtGui.QPushButton, "btnAddKey").clicked.connect(self.__onAddKey)
+      widget.findChild(QtGui.QPushButton, "btnModKey").clicked.connect(self.__onModKey)
+      widget.findChild(QtGui.QPushButton, "btnDelKey").clicked.connect(self.__onDelKey)
 
-        self.annotatorConfig = {}
-        self.syncLists()
-        # listen to keypress events and send signals
+      self.annotatorConfig = {}
+      try:
+        f = open("shortcuts.cfg", "rb")
+        self.annotatorConfig = pickle.load(f)
+      except Exception:
+        print "Error loading shortcut file"
+
+      self.syncLists()
+      # listen to keypress events and send signals
+
+      self.saveShortcutsOnExit = True
+
+    def quit(self):
+      if self.saveShortcutsOnExit:
+        # serialize config
+        print "Saving annotatorConfig"
+        f = open("shortcuts.cfg", "wb")
+        pickle.dump(self.annotatorConfig, f, pickle.HIGHEST_PROTOCOL)
 
 
     ## Sets the displayed configuration by a list of LabelMeta instances
     def setConfig(self, cfg):
-        pass
+      pass
 
 
     ## Returns the (modified) configuration as a list of LabelMeta instances
     def getConfig(self):
-        pass
+      pass
 
 
     ## Synchronizes the internal list with the displayed table
     def syncLists(self):
-        # save sort column and order for sorting afterwards
+      # save sort column and order for sorting afterwards
         sortCol = self.tableWidget.horizontalHeader().sortIndicatorSection()
         sortOrd = self.tableWidget.horizontalHeader().sortIndicatorOrder()
 
@@ -525,12 +553,12 @@ class AnnotationConfigWidget(QtCore.QObject):
 
 ## Container for label information
 class LabelMeta:
-    ## Constructor
+  ## Constructor
     def __init__(self, name = "", key = None, description = "", toggleMode = True):
-        self.name = name
-        self.key = key
-        self.description = description
-        self.toggleMode = toggleMode
+      self.name = name
+      self.key = key
+      self.description = description
+      self.toggleMode = toggleMode
 
 
 ## A tool for annotating a stream of sensor data with labels
@@ -569,7 +597,6 @@ class Annotator(QtCore.QObject):
 
     # append
     self.data = np.hstack((self.data, ndata))
-    print "annotator data slot reached"
 
 
   ## Slot for key presses
@@ -589,7 +616,7 @@ class Annotator(QtCore.QObject):
   def writeAnnotatedData(self):
     print "annotation is written"
     if not self.annotations:
-        return
+      return
 
     # create "empty" labels
     outLabels = ["other" for i in range(self.data.shape[1])]
@@ -602,8 +629,10 @@ class Annotator(QtCore.QObject):
     # create final output data
     outData = ""
     for i in range(self.data.shape[1]):
-        nums = self.data[:,i].tolist()
-        outData += outLabels[i] + ' ' + ' '.join(nums) + '\n'
+      nums = self.data[:,i].tolist()
+      outData += outLabels[i] + ' ' + ' '.join(nums) + '\n'
+
+    print "numData: " + str(self.data.shape[1]) + "lenOutData: " + str(len(outData))
 
     # open file and write
     outFile = open(self.outFilePath, 'w')
