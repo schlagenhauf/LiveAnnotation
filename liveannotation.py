@@ -134,22 +134,21 @@ class GraphicsLayoutWidget:
 
   ## creates new linearRegion objects if necessary and deletes outdated ones
   def __updateClassLabels(self):
-    # update class labeling
-      for cl in self.annotations:
-        if not cl.linReg:
-          for pl in self.plots:
-            linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
-            linReg.setZValue(-10)
-            pl.addItem(linReg)
-            cl.linReg.append(linReg)
+    for cl in self.annotations:
+      if not cl.linReg:
+        for pl in self.plots:
+          linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
+          linReg.setZValue(-10)
+          pl.addItem(linReg)
+          cl.linReg.append(linReg)
 
-        # update bounds if necessary
-        if [cl.startIdx, cl.endIdx] != cl.linReg[0].getRegion():
-          endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
-          for lr in cl.linReg:
-            lr.setRegion([cl.startIdx, endIdx])
+      # update bounds if necessary
+      if [cl.startIdx, cl.endIdx] != cl.linReg[0].getRegion():
+        endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
+        for lr in cl.linReg:
+          lr.setRegion([cl.startIdx, endIdx])
 
-      self.__setStatusLabel()
+    self.__setStatusLabel()
 
 
   def __setStatusLabel(self):
@@ -247,6 +246,7 @@ class VideoWidget:
     if self.isRunning:
       self.pipeline.set_state(gst.STATE_NULL)
 
+
   def __onRec(self):
     if not self.isRecording:
       self.__startRecording()
@@ -258,33 +258,35 @@ class VideoWidget:
 
   def __startRecording(self):
     # enable pipeline output to file
-    print "Start rec"
+    self.isRecording = True
 
 
   def __stopRecording(self):
-    print "Stop rec"
+    self.isRecording = False
 
 
   def updatePipeline(self, source):
     # create trunk pipeline, source and tee
-    self.pipelineTrunk = gst.Pipeline("videopl")
+    self.pipelineTrunk = gst.Pipeline("trunk")
     self.source = gst.element_factory_make(source, "vsource")
-    self.tee = gst.element_factory_make("tee", "streamtee")
+    self.tee = gst.element_factory_make("tee", "tee")
     self.pipelineTrunk.add(self.source, self.tee)
     gst.element_link_many(self.source, self.tee)
 
-    #self.sink = gst.element_factory_make("autovideosink", "outsink")
-    self.sink = gst.element_factory_make("filesink", "fsink")
-    self.sink.set_property('location', r'/home/pheenx/tmp/outvideo')
-    self.sink.set_property('sync', 'false')
+    # create screen video output branch
+    self.pipelineScreenBranch = gst.Pipeline("screenBranch")
+    self.tee = gst.element_factory_make("tee", "streamtee")
+    self.screenSink = gst.element_factory_make("autovideosink", "screensink")
+    self.pipelineScreenBranch.add(self.tee, self.screenSink)
+    gst.element_link_many(self.tee, self.screenSink)
 
-
-    # connect them
-    #self.pipelineTrunk.add(self.source, self.sink)
-    #gst.element_link_many(self.source, self.sink)
+    # create screen video output branch
+    self.fileSink = gst.element_factory_make("filesink", "fsink")
+    self.fileSink.set_property('location', r'/home/pheenx/tmp/outvideo')
+    self.fileSink.set_property('sync', 'false')
 
     # intercept all bus messages so we can grab the frame
-    bus = self.pipelineTrunk.get_bus()
+    bus = self.pipelineScreenBranch.get_bus()
     bus.add_signal_watch()
     bus.enable_sync_message_emission()
     bus.connect("message", self.__onMessage)
