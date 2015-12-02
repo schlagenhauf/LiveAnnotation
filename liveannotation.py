@@ -6,8 +6,13 @@ from PyQt4.QtCore import pyqtSlot, pyqtSignal
 from pyqtgraph.parametertree import Parameter
 import pyqtgraph as pg
 
-import gst, gobject
-gobject.threads_init()
+#import gst, gobject
+#gobject.threads_init()
+import gi
+gi.require_version('Gst', '1.0')
+from gi.repository import Gst, GObject, GstVideo, GdkX11
+GObject.threads_init()
+Gst.init(None)
 
 import numpy as np
 
@@ -70,7 +75,6 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
   # only use getConfigValue here, to ensure that all values are updated
   def updateConfigurables(self):
     # video config
-    print self.config.getConfigValue('Video Source')
     self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
 
 
@@ -239,77 +243,105 @@ class VideoWidget:
 
   def __onPlay(self):
     if not self.isRunning:
-      self.pipeline.set_state(gst.STATE_PLAYING)
+      self.pl.set_state(Gst.State.PLAYING)
+      self.isRunning = True
 
 
   def __onPause(self):
     if self.isRunning:
-      self.pipeline.set_state(gst.STATE_NULL)
+      self.pl.set_state(Gst.State.NULL)
+      self.isRunning = False
 
 
   def __onRec(self):
     if not self.isRecording:
-      self.__startRecording()
       self.isRecording = True
     else:
-      self.__stopRecording()
       self.isRecording = False
 
 
-  def __startRecording(self):
-    # enable pipeline output to file
-    self.isRecording = True
-
-
-  def __stopRecording(self):
-    self.isRecording = False
-
-
   def updatePipeline(self, source):
-    # create trunk pipeline, source and tee
-    self.pipelineTrunk = gst.Pipeline("trunk")
-    self.source = gst.element_factory_make(source, "vsource")
-    self.tee = gst.element_factory_make("tee", "tee")
-    self.pipelineTrunk.add(self.source, self.tee)
-    gst.element_link_many(self.source, self.tee)
+    # create pipeline and elements
+    self.pl = Gst.Pipeline("pipeline")
 
-    # create screen video output branch
-    self.pipelineScreenBranch = gst.Pipeline("screenBranch")
-    self.tee = gst.element_factory_make("tee", "streamtee")
-    self.screenSink = gst.element_factory_make("autovideosink", "screensink")
-    self.pipelineScreenBranch.add(self.tee, self.screenSink)
-    gst.element_link_many(self.tee, self.screenSink)
+    self.source = Gst.ElementFactory.make(source, None)
+    self.tee = Gst.ElementFactory.make("tee", None)
+    self.screenQueue = Gst.ElementFactory.make("queue", None)
+    self.screenSink = Gst.ElementFactory.make("autovideosink", None)
+    self.screenSink.set_property('async-handling', 'true')
 
-    # create screen video output branch
-    self.fileSink = gst.element_factory_make("filesink", "fsink")
-    self.fileSink.set_property('location', r'/home/pheenx/tmp/outvideo')
-    self.fileSink.set_property('sync', 'false')
+    self.fileQueue = Gst.ElementFactory.make("queue", None)
+    self.videoConvert = Gst.ElementFactory.make("videoconvert", None)
+    self.enc = Gst.ElementFactory.make("x264enc", None)
+    self.mux = Gst.ElementFactory.make("mp4mux", None)
+    self.fileSink = Gst.ElementFactory.make("filesink", None)
+    self.fileSink.set_property('location', r'outvideo.raw')
+    #self.fileSink.set_property('async', '0')
+    self.fileSink.set_property('sync', 'true')
 
-    # intercept all bus messages so we can grab the frame
-    bus = self.pipelineScreenBranch.get_bus()
+
+    # add elements to pipeline and connect them
+
+    self.pl.add(self.source)
+    self.pl.add(self.tee)
+    self.pl.add(self.screenQueue)
+    self.pl.add(self.screenSink)
+    self.pl.add(self.fileQueue)
+    self.pl.add(self.videoConvert)
+    self.pl.add(self.enc)
+    self.pl.add(self.mux)
+    self.pl.add(self.fileSink)
+
+    self.source.link(self.tee)
+
+    self.teeScreenPad = self.tee.get_request_pad("src_%u")
+    self.queueScreenPad = self.screenQueue.get_static_pad("sink")
+    self.teeFilePad = self.tee.get_request_pad("src_%u")
+    self.queueFilePad = self.fileQueue.get_static_pad("sink")
+
+    self.teeScreenPad.link(self.queueScreenPad)
+    self.screenQueue.link(self.screenSink)
+
+    self.teeFilePad.link(self.queueFilePad)
+    self.fileQueue.link(self.videoConvert)
+    self.videoConvert.link(self.enc)
+    self.enc.link(self.mux)
+    self.mux.link(self.fileSink)
+
+
+    # intercept sync messages so we can set in which window to draw in
+    bus = self.pl.get_bus()
     bus.add_signal_watch()
     bus.enable_sync_message_emission()
-    bus.connect("message", self.__onMessage)
+    bus.connect("message::eos", self.__onEos)
+    bus.connect("message::error", self.__onError)
     bus.connect("sync-message::element", self.__onSyncMessage)
 
 
-  def __onMessage(self, bus, message):
-    t = message.type
-    if t == gst.MESSAGE_EOS:
-      self.player.set_state(gst.STATE_NULL)
-    elif t == gst.MESSAGE_ERROR:
-      err, debug = message.parse_error()
-      print "Error: %s" % err, debug
-      self.player.set_state(gst.STATE_NULL)
+  def __onEos(self, bus, message):
+    self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, 0)
+    self.pl.set_state(Gst.State.NULL)
+
+
+  def __onError(self, bus, message):
+    err, debug = message.parse_error()
+    print "Error: %s" % err, debug
+    self.pl.set_state(Gst.State.NULL)
+
 
   def __onSyncMessage(self, bus, message):
-    if message.structure is None:
-      return
-    message_name = message.structure.get_name()
-    if message_name == "prepare-xwindow-id":
+    if message.get_structure().get_name() == "prepare-window-handle":
       imagesink = message.src
       imagesink.set_property("force-aspect-ratio", True)
-      imagesink.set_xwindow_id(self.widget.winId())
+      imagesink.set_window_handle(self.widget.winId())
+
+
+  @staticmethod
+  def linkMulti(elements):
+    assert(len(elements) > 1)
+    for a,b in zip(elements, elements[1:]):
+      a.link(b)
+
 
 
 
@@ -336,6 +368,12 @@ class ParameterTreeWidget:
         {'name': 'Displayed Samples (0 for all)', 'type': 'int', 'value': 500},
       ]},
     ]
+
+    ### MORE PARAMS TO BE IMPLEMENTED
+    # - output video file path
+    # - overwrite / append / create new output video file
+    # - custom Gstreamer source string
+
 
     self.p = Parameter.create(name='params', type='group', children=defaultParams)
 
