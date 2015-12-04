@@ -6,8 +6,6 @@ from PyQt4.QtCore import pyqtSlot, pyqtSignal
 from pyqtgraph.parametertree import Parameter
 import pyqtgraph as pg
 
-#import gst, gobject
-#gobject.threads_init()
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GObject, GstVideo, GdkX11
@@ -29,10 +27,31 @@ import dataparser as dp
 #   Sensor data
 #   Labels
 
+### TODOS ###
+# - stop label when corresponding shortcut is deleted
+# - fix performance issue
+# - enable configuration
+# - sometimes a label is initially marked as OFF (fixed? by setting everything to zero before saving)
+# - new labels are sometimes not usable
+# - add status string under video / plotter
+# - get video with compression to work
+# - "null pointer passed" error at shutdown
+
 ########## Application GUI
 
 main_form = uic.loadUiType("la.ui")[0]
 dialog_form = uic.loadUiType("ad.ui")[0]
+
+
+## Interface for all modules that have adjustable values
+class Configurable():
+  ## Set default values
+  def configure(self):
+
+  ## Set values from the config module
+  def configure(self, config):
+    pass
+
 
 
 ## Top level class for main window and module instances
@@ -58,7 +77,9 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
     dp.connect(self.plotter.dataSlot)
     dp.connect(self.annotator.dataSlot)
 
+
     # set all config values
+    self.connect(self.tabWidget, QtCore.SIGNAL('currentChanged(int)'), self.updateConfigurables)
     self.updateConfigurables()
 
 
@@ -74,8 +95,12 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
   ## Sets all config values again (e.g. after changing the config)
   # only use getConfigValue here, to ensure that all values are updated
   def updateConfigurables(self):
-    # video config
+    print 'Reconfiguring all modules'
     self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
+    #self.stream.configure(self.config)
+    #self.plotter.configure(self.config)
+    #self.annotatorConfig.configure(self.config)
+    #self.annotator.configure(self.config)
 
 
 
@@ -90,6 +115,7 @@ class Label:
     return str((self.name, self.startIdx, self.endIdx))
 
 
+
 class PlotLabel(Label):
   def __init__(self, name = 'other', startIdx = 0, endIdx = -1):
     Label.__init__(self, name, startIdx, endIdx)
@@ -97,9 +123,8 @@ class PlotLabel(Label):
 
 
 
-
 ## Widget managing plotting
-class GraphicsLayoutWidget:
+class GraphicsLayoutWidget(Configurable):
   ## Constructor
   def __init__(self, widget): # create plot window self.w = widget
     self.plots = []
@@ -129,6 +154,11 @@ class GraphicsLayoutWidget:
     self.__updateClassLabels()
 
     app.processEvents()  ## force complete redraw for every plot
+
+
+  def configure(self, config):
+    self.xLimit = config.getConfigValue('XLimit')
+    self.rate = config.getConfigValue('Data Sample Rate')
 
 
   def quit(self):
@@ -229,7 +259,7 @@ class GraphicsLayoutWidget:
 
 
 ## Widget managing video stream
-class VideoWidget:
+class VideoWidget(Configurable):
   ## Constructor
   def __init__(self, widget):
     self.widget = widget
@@ -239,6 +269,12 @@ class VideoWidget:
     self.isRunning = False
     self.isRecording = False
     self.fileOutPath = ""
+    self.source = ""
+
+
+  def configure(self, config):
+    self.fileOutPath = config.getConfigValue('Video Output Path')
+    self.source = config.getConfigValue('Video Source')
 
 
   def __onPlay(self):
@@ -276,7 +312,6 @@ class VideoWidget:
     self.mux = Gst.ElementFactory.make("mp4mux", None)
     self.fileSink = Gst.ElementFactory.make("filesink", None)
     self.fileSink.set_property('location', r'outvideo.raw')
-    #self.fileSink.set_property('async', '0')
     self.fileSink.set_property('sync', 'true')
 
 
@@ -344,11 +379,11 @@ class VideoWidget:
 
 
 
-
 ## Widget populating and reading configuration
-class ParameterTreeWidget:
+class ParameterTreeWidget(QtCore.QObject):
   ## Constructor
   def __init__(self, parameterView):
+    super(ParameterTreeWidget, self).__init__()
     defaultParams = [
       {'name': 'General', 'type': 'group', 'children': [
         {'name': 'Config Path', 'type': 'str', 'value': "config.cfg"},
@@ -472,116 +507,137 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
 
 
 ## Class managing the annotation configuration widget
-class AnnotationConfigWidget(QtCore.QObject):
+class AnnotationConfigWidget(QtCore.QObject, Configurable):
   #class AnnotationConfigWidget:
-    keyPressSignal = pyqtSignal(tuple)
+  keyPressSignal = pyqtSignal(tuple)
 
-    ## Constructor
-    def __init__(self, widget):
-      super(AnnotationConfigWidget, self).__init__()
-      # get access to all elements in the annotation config qframe
-      self.widget = widget
-      self.tableWidget = widget.findChild(QtGui.QTableWidget, "keyTable")
-      widget.findChild(QtGui.QPushButton, "btnAddKey").clicked.connect(self.__onAddKey)
-      widget.findChild(QtGui.QPushButton, "btnModKey").clicked.connect(self.__onModKey)
-      widget.findChild(QtGui.QPushButton, "btnDelKey").clicked.connect(self.__onDelKey)
+  ## Constructor
+  def __init__(self, widget):
+    super(AnnotationConfigWidget, self).__init__()
+    # get access to all elements in the annotation config qframe
+    self.widget = widget
+    self.tableWidget = widget.findChild(QtGui.QTableWidget, "keyTable")
+    widget.findChild(QtGui.QPushButton, "btnAddKey").clicked.connect(self.__onAddKey)
+    widget.findChild(QtGui.QPushButton, "btnModKey").clicked.connect(self.__onModKey)
+    widget.findChild(QtGui.QPushButton, "btnDelKey").clicked.connect(self.__onDelKey)
 
-      self.annotatorConfig = {}
-      try:
-        f = open("shortcuts.cfg", "rb")
-        self.annotatorConfig = pickle.load(f)
-      except Exception:
-        print "Error loading shortcut file"
+    self.annotatorConfig = {}
+    try:
+      f = open("shortcuts.cfg", "rb")
+      self.annotatorConfig = pickle.load(f)
+    except Exception:
+      print "Error loading shortcut file"
 
-      self.syncLists()
-      # listen to keypress events and send signals
+    self.syncLists()
+    # listen to keypress events and send signals
 
-      self.saveShortcutsOnExit = True
+    self.saveShortcutsOnExit = True
+
+  def configure(self, config):
+    pass
+
+  def quit(self):
+    if self.saveShortcutsOnExit:
+      # turn all labels off
+      for k,v in self.annotatorConfig.iteritems():
+        self.annotatorConfig[k] = (v[0], False)
+
+      # serialize config
+      f = open("shortcuts.cfg", "wb")
+      pickle.dump(self.annotatorConfig, f, pickle.HIGHEST_PROTOCOL)
 
 
-    def quit(self):
-      if self.saveShortcutsOnExit:
-        # serialize config
-        f = open("shortcuts.cfg", "wb")
-        pickle.dump(self.annotatorConfig, f, pickle.HIGHEST_PROTOCOL)
+  ## Synchronizes the internal list with the displayed table
+  def syncLists(self):
+    # save sort column and order for sorting afterwards
+    sortCol = self.tableWidget.horizontalHeader().sortIndicatorSection()
+    sortOrd = self.tableWidget.horizontalHeader().sortIndicatorOrder()
+
+    # clear table and reinsert all items
+    self.tableWidget.clearContents()
+    self.tableWidget.setRowCount(len(self.annotatorConfig))
+    for i,tup in enumerate(self.annotatorConfig.itervalues()):
+      v = tup[0]
+      self.tableWidget.setItem(i,0,QtGui.QTableWidgetItem(v.name))
+      self.tableWidget.setItem(i,1,QtGui.QTableWidgetItem(v.key.toString()))
+      if v.toggleMode:
+        self.tableWidget.setItem(i,2,QtGui.QTableWidgetItem("Toggle"))
+      else:
+        self.tableWidget.setItem(i,2,QtGui.QTableWidgetItem("Hold"))
+      self.tableWidget.setItem(i,3,QtGui.QTableWidgetItem(v.description))
+
+    # sort table again
+    self.tableWidget.sortItems(sortCol, sortOrd)
+
+    # update key map
+    self.shortcuts = []
+    for v,s in self.annotatorConfig.itervalues():
+      self.shortcuts.append(QtGui.QShortcut(v.key, self.widget, lambda: self.__onShortcutEnable(v.key)))
 
 
-    ## Synchronizes the internal list with the displayed table
-    def syncLists(self):
-      # save sort column and order for sorting afterwards
-      sortCol = self.tableWidget.horizontalHeader().sortIndicatorSection()
-      sortOrd = self.tableWidget.horizontalHeader().sortIndicatorOrder()
+  ## pseudo slot for key presses. translates key press into label and status
+  def __onShortcutEnable(self, keySeq):
+    for label, state in self.annotatorConfig.itervalues():
+      if label.key == keySeq:
+        #print 'KeySeq: ' + str(keySeq.toString()) + ', label: ' + label.name + ', state: ' + str(self.annotatorConfig[label.name][1])
+        self.annotatorConfig[label.name] = (label, not state)
+        self.keyPressSignal.emit((label.name, not state))
 
-      # clear table and reinsert all items
-      self.tableWidget.clearContents()
-      self.tableWidget.setRowCount(len(self.annotatorConfig))
-      for i,tup in enumerate(self.annotatorConfig.itervalues()):
-        v = tup[0]
-        self.tableWidget.setItem(i,0,QtGui.QTableWidgetItem(v.name))
-        self.tableWidget.setItem(i,1,QtGui.QTableWidgetItem(v.key.toString()))
-        if v.toggleMode:
-          self.tableWidget.setItem(i,2,QtGui.QTableWidgetItem("Toggle"))
+
+  def __onAddKey(self):
+    # open dialog window
+    dialog = AddEntryDialog(args = [], parent=self.widget)
+    dialog.setModal(True)
+    if dialog.exec_(): # if dialog closes with accept()
+        lm = dialog.lm
+        if self.annotatorConfig.has_key(lm.key):
+          self.annotatorConfig[lm.name] = (lm, self.annotatorConfig[lm.name][1])
         else:
-          self.tableWidget.setItem(i,2,QtGui.QTableWidgetItem("Hold"))
-        self.tableWidget.setItem(i,3,QtGui.QTableWidgetItem(v.description))
-
-      # sort table again
-      self.tableWidget.sortItems(sortCol, sortOrd)
-
-      # update key map
-      self.shortcuts = []
-      for v,s in self.annotatorConfig.itervalues():
-        self.shortcuts.append(QtGui.QShortcut(v.key, self.widget, lambda: self.__onShortcutEnable(v.key)))
+          self.annotatorConfig[lm.name] = (lm, False)
+        self.syncLists()
 
 
-    ## pseudo slot for key presses. translates key press into label and status
-    def __onShortcutEnable(self, keySeq):
-        for label, state in self.annotatorConfig.itervalues():
-            if label.key == keySeq:
-                self.annotatorConfig[label.name] = (label, not state)
-                self.keyPressSignal.emit((label.name, state))
+  def __onDelKey(self):
+    # get currently selected item and delete it
+    row = self.tableWidget.currentRow()
+
+    # check if there is an item selected
+    if row == -1:
+      return
+
+    # delete table widget item and dict item
+    label = str(self.tableWidget.item(row,0).text())
+    del(self.annotatorConfig[label])
+    self.syncLists()
 
 
-    def __onAddKey(self):
-        # open dialog window
-        content = None
-        dialog = AddEntryDialog(args = [], parent=self.widget)
-        dialog.setModal(True)
-        if dialog.exec_(): # if dialog closes with accept()
-            lm = dialog.lm
-            if self.annotatorConfig.has_key(lm.key):
-              self.annotatorConfig[lm.name] = (lm, self.annotatorConfig[lm.name][1])
-            else:
-              self.annotatorConfig[lm.name] = (lm, False)
-            self.syncLists()
+  def __onModKey(self):
+    # get currently selected item and open the additem dialog
+    row = self.tableWidget.currentRow()
+
+    # check if there is an item selected
+    if row == -1:
+      return
+
+    label = str(self.tableWidget.item(row,0).text())
+    lmOld = self.annotatorConfig[label][0]
+
+    # open dialog window
+    dialog = AddEntryDialog(args = [], parent=self.widget)
+    dialog.setModal(True)
+    dialog.setValues(lmOld)
+    if dialog.exec_():
+      del(self.annotatorConfig[label])
+      self.annotatorConfig[dialog.lm.name] = (dialog.lm, False)
+      self.syncLists()
 
 
-    def __onDelKey(self):
-        # get currently selected item and delete it
-        pass
+  def __updateTableWidget(self):
+    self.tableWidget.clearContents()
+    self.tableWidget.setRowCount(len(self.keys))
 
-
-    def __onModKey(self):
-        # get currently selected item and open the additem dialog
-        row = self.tableWidget.currentRow()
-        label = self.tableWidget.item(row,0).text()
-        lmOld = self.annotatorConfig[label]
-        # open dialog window
-        dialog = AddEntryDialog(args = [], parent=self.widget)
-        dialog.setModal(True)
-        dialog.setValues(lmOld)
-        if dialog.exec_():
-            lmNew = dialog.lm
-            self.annotatorConfig[lmNew.name] = lmNew
-            self.syncLists()
-
-
-    def __updateTableWidget(self):
-        self.tableWidget.clearContents()
-        self.tableWidget.setRowCount(len(self.keys))
-
-        for kv, i in zip(self.keys.iteritems(), range(len(self.keys))):
-            self.tableWidget.setItem(i, 0, QtGui.QTableWidgetItem(kv[0]))
+    for kv, i in zip(self.keys.iteritems(), range(len(self.keys))):
+      self.tableWidget.setItem(i, 0, QtGui.QTableWidgetItem(kv[0]))
 
 
 
@@ -651,15 +707,13 @@ class Annotator(QtCore.QObject):
       for l in reversed(self.annotations):
         if l.name == data[0]: # if same label type
           l.endIdx = numSamples
+          print 'New label: ' + str(self.annotations[-1])
           break
 
       else:
-        print "Error: ending label failed, no corresponding start (annotator)"
-
-    #self.newLabelSignal.emit((self.annotations[-1].name) # tuple = (name, start or end, index)
+        print "Annotator Error: ending label failed, no corresponding start"
 
     print "num annots: " + str(len(self.annotations)) + " , tuple: " + str(data)
-    print 'New label: ' + str(self.annotations[-1])
 
 
 
