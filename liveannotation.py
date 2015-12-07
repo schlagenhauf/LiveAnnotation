@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import sys, pickle
+import sys, pickle, inspect
 from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtCore import pyqtSlot, pyqtSignal
 from pyqtgraph.parametertree import Parameter
@@ -47,6 +47,7 @@ dialog_form = uic.loadUiType("ad.ui")[0]
 class Configurable():
   ## Set default values
   def configure(self):
+    pass
 
   ## Set values from the config module
   def configure(self, config):
@@ -266,6 +267,7 @@ class VideoWidget(Configurable):
     self.widget.parent().findChild(QtGui.QPushButton, "btnRec").clicked.connect(self.__onRec)
     self.widget.parent().findChild(QtGui.QPushButton, "btnPlay").clicked.connect(self.__onPlay)
     self.widget.parent().findChild(QtGui.QPushButton, "btnPause").clicked.connect(self.__onPause)
+    self.statusLabel = self.widget.parent().findChild(QtGui.QLabel, "labelVideoStatus")
     self.isRunning = False
     self.isRecording = False
     self.fileOutPath = ""
@@ -285,7 +287,8 @@ class VideoWidget(Configurable):
 
   def __onPause(self):
     if self.isRunning:
-      self.pl.set_state(Gst.State.NULL)
+      self.pl.send_event(Gst.Event.new_eos())
+      #self.pl.set_state(Gst.State.NULL)
       self.isRunning = False
 
 
@@ -298,63 +301,27 @@ class VideoWidget(Configurable):
 
   def updatePipeline(self, source):
     # create pipeline and elements
-    self.pl = Gst.Pipeline("pipeline")
 
-    self.source = Gst.ElementFactory.make(source, None)
-    self.tee = Gst.ElementFactory.make("tee", None)
-    self.screenQueue = Gst.ElementFactory.make("queue", None)
-    self.screenSink = Gst.ElementFactory.make("autovideosink", None)
-    self.screenSink.set_property('async-handling', 'true')
-
-    self.fileQueue = Gst.ElementFactory.make("queue", None)
-    self.videoConvert = Gst.ElementFactory.make("videoconvert", None)
-    self.enc = Gst.ElementFactory.make("x264enc", None)
-    self.mux = Gst.ElementFactory.make("mp4mux", None)
-    self.fileSink = Gst.ElementFactory.make("filesink", None)
-    self.fileSink.set_property('location', r'outvideo.raw')
-    self.fileSink.set_property('sync', 'true')
-
-
-    # add elements to pipeline and connect them
-
-    self.pl.add(self.source)
-    self.pl.add(self.tee)
-    self.pl.add(self.screenQueue)
-    self.pl.add(self.screenSink)
-    self.pl.add(self.fileQueue)
-    self.pl.add(self.videoConvert)
-    self.pl.add(self.enc)
-    self.pl.add(self.mux)
-    self.pl.add(self.fileSink)
-
-    self.source.link(self.tee)
-
-    self.teeScreenPad = self.tee.get_request_pad("src_%u")
-    self.queueScreenPad = self.screenQueue.get_static_pad("sink")
-    self.teeFilePad = self.tee.get_request_pad("src_%u")
-    self.queueFilePad = self.fileQueue.get_static_pad("sink")
-
-    self.teeScreenPad.link(self.queueScreenPad)
-    self.screenQueue.link(self.screenSink)
-
-    self.teeFilePad.link(self.queueFilePad)
-    self.fileQueue.link(self.videoConvert)
-    self.videoConvert.link(self.enc)
-    self.enc.link(self.mux)
-    self.mux.link(self.fileSink)
-
+    self.pl = Gst.parse_launch("videotestsrc ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink")
 
     # intercept sync messages so we can set in which window to draw in
     bus = self.pl.get_bus()
     bus.add_signal_watch()
     bus.enable_sync_message_emission()
+    #bus.connect("message::state-changed", self.__onStateChange)
     bus.connect("message::eos", self.__onEos)
     bus.connect("message::error", self.__onError)
     bus.connect("sync-message::element", self.__onSyncMessage)
 
 
+  def __onStateChange(self, bus, message):
+    old, new, pending = message.parse_state_changed()
+    #self.statusLabel.setText("Pipeline State: " + Gst.Element.state_get_name(new))
+
+
   def __onEos(self, bus, message):
-    self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, 0)
+    print "EOS"
+    #self.pl.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, 0)
     self.pl.set_state(Gst.State.NULL)
 
 
