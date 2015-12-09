@@ -98,7 +98,7 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
   def updateConfigurables(self):
     print 'Reconfiguring all modules'
     self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
-    #self.stream.configure(self.config)
+    self.stream.configure(self.config)
     #self.plotter.configure(self.config)
     #self.annotatorConfig.configure(self.config)
     #self.annotator.configure(self.config)
@@ -270,6 +270,7 @@ class VideoWidget(Configurable):
     self.statusLabel = self.widget.parent().findChild(QtGui.QLabel, "labelVideoStatus")
     self.isRunning = False
     self.isRecording = False
+    self.isReady = True
     self.fileOutPath = ""
     self.source = ""
 
@@ -299,10 +300,11 @@ class VideoWidget(Configurable):
       self.isRecording = False
 
 
-  def updatePipeline(self, source):
+  def updatePipeline(self):
     # create pipeline and elements
 
-    self.pl = Gst.parse_launch("videotestsrc ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink")
+    pipeString = self.source + " ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink"
+    self.pl = Gst.parse_launch(pipeString)
 
     # intercept sync messages so we can set in which window to draw in
     bus = self.pl.get_bus()
