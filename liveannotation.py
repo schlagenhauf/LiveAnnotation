@@ -97,7 +97,7 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
   # only use getConfigValue here, to ensure that all values are updated
   def updateConfigurables(self):
     print 'Reconfiguring all modules'
-    self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
+    #self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
     self.stream.configure(self.config)
     #self.plotter.configure(self.config)
     #self.annotatorConfig.configure(self.config)
@@ -258,6 +258,113 @@ class GraphicsLayoutWidget(Configurable):
     self.__updateYLabels()
 
 
+## GStreamer video secording and display Wrapper
+class VideoWrapper:
+  def __init__(self, targetWin):
+    self.pl = None
+    self.isRunning = False
+    self.isRecording = False
+    self.isReady = True
+
+    self.targetWin = targetWin
+    self.fileOutPath = ""
+    self.source = "videotestsrc"
+
+
+  ## If not already running / ready / not recording, create a new pipeline and start it
+  def play(self):
+    if self.isRunning or not self.isReady or self.isRecording:
+      return
+
+    self.isRunning = True
+    self.__updatePipeline()
+    self.pl.set_state(Gst.State.PLAYING)
+
+
+  ## If currently running, stop the pipeline and set to not ready
+  def stop(self):
+    if self.isRunning:
+      self.isRunning = False
+      self.isReady = False
+      self.isRecording = False
+      self.pl.send_event(Gst.Event.new_eos())
+
+
+  ## Turns the recording on or off, depending on the previous state. Only allowed when running
+  def toggleRec(self):
+    if not self.isRunning or not self.isReady:
+      return
+
+    if not self.isRecording:
+      self.isRecording = True
+      self.play()
+    else:
+      self.isRecording = False
+      self.isReady = False
+      self.pl.send_event(Gst.Event.new_eos())
+
+
+  def getStateStr(self):
+    state = "Running, " if self.isRunning else "Halted, "
+    state += "Ready, " if self.isReady else "Not Ready, "
+    state += "Recording, " if self.isRecording else "Not Recording, "
+    return state
+
+
+  ## Creates / updates the GStreamer pipeline according to the currently set state
+  def __updatePipeline(self):
+    if self.pl:
+      self.pl.set_state(Gst.State.NULL)
+    pipeString = ""
+    if self.isRecording:
+      pipeString = self.source + " ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=./outvid01 async=0 t. ! queue ! autovideosink"
+    else:
+      pipeString = self.source + " ! autovideosink"
+
+    self.pl = Gst.parse_launch(pipeString)
+
+    # intercept sync messages so we can set in which window to draw in
+    bus = self.pl.get_bus()
+    bus.add_signal_watch()
+    bus.enable_sync_message_emission()
+    bus.connect("message::eos", self.__onEos)
+    bus.connect("message::error", self.__onError)
+    bus.connect("sync-message::element", self.__onSyncMessage)
+
+
+  ## GStreamer Callback for end of stream messages
+  def __onEos(self, bus, message):
+    self.pl.set_state(Gst.State.NULL)
+
+    # if we got here by stopping the recording, update the pipeline and start again
+    if self.isRunning:
+      self.__updatePipeline()
+      self.play()
+    else:
+      self.pl = None
+
+    self.isReady = True
+    print "EOS"
+
+
+  ## GStreamer Callback for error messages
+  def __onError(self, bus, message):
+    err, debug = message.parse_error()
+    print "Error: %s" % err, debug
+    self.pl.set_state(Gst.State.NULL)
+    self.isRunning = False
+    self.isRecording = False
+    self.isReady = True
+
+
+  ## GStreamer Callback for sync messages, sent when autovideosink wants to draw to an x window
+  def __onSyncMessage(self, bus, message):
+    if message.get_structure().get_name() == "prepare-window-handle":
+      imagesink = message.src
+      imagesink.set_property("force-aspect-ratio", True)
+      imagesink.set_window_handle(self.targetWin.winId())
+
+
 
 ## Widget managing video stream
 class VideoWidget(Configurable):
@@ -268,83 +375,37 @@ class VideoWidget(Configurable):
     self.widget.parent().findChild(QtGui.QPushButton, "btnPlay").clicked.connect(self.__onPlay)
     self.widget.parent().findChild(QtGui.QPushButton, "btnPause").clicked.connect(self.__onPause)
     self.statusLabel = self.widget.parent().findChild(QtGui.QLabel, "labelVideoStatus")
-    self.isRunning = False
-    self.isRecording = False
-    self.isReady = True
-    self.fileOutPath = ""
-    self.source = ""
+
+    self.wrapper = VideoWrapper(self.widget)
 
 
+  ## Play button callback
+  def __onPlay(self):
+    self.wrapper.play()
+    self.__updateStatusLabel()
+
+
+  ## Pause button callback
+  def __onPause(self):
+    self.wrapper.stop()
+    self.__updateStatusLabel()
+
+
+  ## Record button callback
+  def __onRec(self):
+    self.wrapper.toggleRec()
+    self.__updateStatusLabel()
+
+
+  ## Configurable member
   def configure(self, config):
     self.fileOutPath = config.getConfigValue('Video Output Path')
     self.source = config.getConfigValue('Video Source')
 
 
-  def __onPlay(self):
-    if not self.isRunning:
-      self.pl.set_state(Gst.State.PLAYING)
-      self.isRunning = True
-
-
-  def __onPause(self):
-    if self.isRunning:
-      self.pl.send_event(Gst.Event.new_eos())
-      #self.pl.set_state(Gst.State.NULL)
-      self.isRunning = False
-
-
-  def __onRec(self):
-    if not self.isRecording:
-      self.isRecording = True
-    else:
-      self.isRecording = False
-
-
-  def updatePipeline(self):
-    # create pipeline and elements
-
-    pipeString = self.source + " ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink"
-    self.pl = Gst.parse_launch(pipeString)
-
-    # intercept sync messages so we can set in which window to draw in
-    bus = self.pl.get_bus()
-    bus.add_signal_watch()
-    bus.enable_sync_message_emission()
-    #bus.connect("message::state-changed", self.__onStateChange)
-    bus.connect("message::eos", self.__onEos)
-    bus.connect("message::error", self.__onError)
-    bus.connect("sync-message::element", self.__onSyncMessage)
-
-
-  def __onStateChange(self, bus, message):
-    old, new, pending = message.parse_state_changed()
-    #self.statusLabel.setText("Pipeline State: " + Gst.Element.state_get_name(new))
-
-
-  def __onEos(self, bus, message):
-    print "EOS"
-    #self.pl.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, 0)
-    self.pl.set_state(Gst.State.NULL)
-
-
-  def __onError(self, bus, message):
-    err, debug = message.parse_error()
-    print "Error: %s" % err, debug
-    self.pl.set_state(Gst.State.NULL)
-
-
-  def __onSyncMessage(self, bus, message):
-    if message.get_structure().get_name() == "prepare-window-handle":
-      imagesink = message.src
-      imagesink.set_property("force-aspect-ratio", True)
-      imagesink.set_window_handle(self.widget.winId())
-
-
-  @staticmethod
-  def linkMulti(elements):
-    assert(len(elements) > 1)
-    for a,b in zip(elements, elements[1:]):
-      a.link(b)
+  ## Sets the status label text with the current module status
+  def __updateStatusLabel(self):
+    self.statusLabel.setText(self.wrapper.getStateStr())
 
 
 
@@ -474,6 +535,17 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
     self.close()
 
 
+## Container for label information
+class LabelMeta:
+  ## Constructor
+  def __init__(self, name = "", key = None, description = "", toggleMode = True):
+    self.name = name
+    self.key = key
+    self.description = description
+    self.toggleMode = toggleMode
+    self.state = False
+
+
 
 ## Class managing the annotation configuration widget
 class AnnotationConfigWidget(QtCore.QObject, Configurable):
@@ -491,29 +563,42 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
     widget.findChild(QtGui.QPushButton, "btnDelKey").clicked.connect(self.__onDelKey)
 
     self.annotatorConfig = {}
-    try:
-      f = open("shortcuts.cfg", "rb")
-      self.annotatorConfig = pickle.load(f)
-    except Exception:
-      print "Error loading shortcut file"
+    self.loadConfig("shortcuts.cfg")
 
     self.syncLists()
-    # listen to keypress events and send signals
 
     self.saveShortcutsOnExit = True
 
+
   def configure(self, config):
     pass
+
+
+  ## loads the annotation config from a binary file
+  def loadConfig(self, path):
+    try:
+      f = open(path, "rb")
+      self.annotatorConfig = pickle.load(f)
+      print "Existing shortcuts loaded:"
+      for a in self.annotatorConfig:
+        print a
+    except Exception:
+      print "Error loading shortcut file"
+
+
+  def saveConfig(self, path):
+    # serialize config
+    f = open(path, "wb")
+    pickle.dump(self.annotatorConfig, f, pickle.HIGHEST_PROTOCOL)
+
 
   def quit(self):
     if self.saveShortcutsOnExit:
       # turn all labels off
       for k,v in self.annotatorConfig.iteritems():
-        self.annotatorConfig[k] = (v[0], False)
+        self.annotatorConfig[k].state = False
 
-      # serialize config
-      f = open("shortcuts.cfg", "wb")
-      pickle.dump(self.annotatorConfig, f, pickle.HIGHEST_PROTOCOL)
+      self.saveConfig("shortcuts.cfg")
 
 
   ## Synchronizes the internal list with the displayed table
@@ -526,7 +611,7 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
     self.tableWidget.clearContents()
     self.tableWidget.setRowCount(len(self.annotatorConfig))
     for i,tup in enumerate(self.annotatorConfig.itervalues()):
-      v = tup[0]
+      v = tup
       self.tableWidget.setItem(i,0,QtGui.QTableWidgetItem(v.name))
       self.tableWidget.setItem(i,1,QtGui.QTableWidgetItem(v.key.toString()))
       if v.toggleMode:
@@ -540,17 +625,17 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
 
     # update key map
     self.shortcuts = []
-    for v,s in self.annotatorConfig.itervalues():
+    for v in self.annotatorConfig.itervalues():
       self.shortcuts.append(QtGui.QShortcut(v.key, self.widget, lambda: self.__onShortcutEnable(v.key)))
 
 
   ## pseudo slot for key presses. translates key press into label and status
   def __onShortcutEnable(self, keySeq):
-    for label, state in self.annotatorConfig.itervalues():
+    for label in self.annotatorConfig.itervalues():
       if label.key == keySeq:
-        #print 'KeySeq: ' + str(keySeq.toString()) + ', label: ' + label.name + ', state: ' + str(self.annotatorConfig[label.name][1])
-        self.annotatorConfig[label.name] = (label, not state)
-        self.keyPressSignal.emit((label.name, not state))
+        print 'KeySeq: ' + str(keySeq.toString()) + ', label: ' + label.name + ', state: ' + str(label.state)
+        self.annotatorConfig[label.name].state = not label.state
+        self.keyPressSignal.emit((label.name, not label.state))
 
 
   def __onAddKey(self):
@@ -558,12 +643,14 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
     dialog = AddEntryDialog(args = [], parent=self.widget)
     dialog.setModal(True)
     if dialog.exec_(): # if dialog closes with accept()
-        lm = dialog.lm
-        if self.annotatorConfig.has_key(lm.key):
-          self.annotatorConfig[lm.name] = (lm, self.annotatorConfig[lm.name][1])
-        else:
-          self.annotatorConfig[lm.name] = (lm, False)
-        self.syncLists()
+      lm = dialog.lm
+      if self.annotatorConfig.has_key(lm.key):
+        print "Label already exists. Use \"Modify\" to change an existing item."
+        return
+      else:
+        self.annotatorConfig[lm.name] = lm
+
+      self.syncLists()
 
 
   def __onDelKey(self):
@@ -596,8 +683,9 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
     dialog.setModal(True)
     dialog.setValues(lmOld)
     if dialog.exec_():
+      dialog.lm.state = lmOld.state
       del(self.annotatorConfig[label])
-      self.annotatorConfig[dialog.lm.name] = (dialog.lm, False)
+      self.annotatorConfig[dialog.lm.name] = dialog.lm
       self.syncLists()
 
 
@@ -606,21 +694,11 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
     self.tableWidget.setRowCount(len(self.keys))
 
     for kv, i in zip(self.keys.iteritems(), range(len(self.keys))):
-      self.tableWidget.setItem(i, 0, QtGui.QTableWidgetItem(kv[0]))
+      self.tableWidget.setItem(i, 0, QtGui.QTableWidgetItem(kv))
 
 
 
 ########## Application Logic
-
-
-## Container for label information
-class LabelMeta:
-  ## Constructor
-  def __init__(self, name = "", key = None, description = "", toggleMode = True):
-    self.name = name
-    self.key = key
-    self.description = description
-    self.toggleMode = toggleMode
 
 
 ## A tool for annotating a stream of sensor data with labels
@@ -630,7 +708,6 @@ class Annotator(QtCore.QObject):
   ## Constructor
   def __init__(self):
     super(Annotator, self).__init__()
-    self.labelMapping = [] # list of LabelMeta instances
     self.annotations = [] # list of touples containing label, index, and start/stop flag
     self.data = np.zeros((0,0))
     self.outFilePath = 'annotationOut.txt'
