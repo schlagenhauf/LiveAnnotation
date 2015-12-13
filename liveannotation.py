@@ -31,8 +31,6 @@ import dataparser as dp
 # - stop label when corresponding shortcut is deleted
 # - fix performance issue
 # - enable configuration
-# - sometimes a label is initially marked as OFF (fixed? by setting everything to zero before saving)
-# - new labels are sometimes not usable
 # - add status string under video / plotter
 # - get video with compression to work
 # - "null pointer passed" error at shutdown
@@ -82,6 +80,15 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
     # set all config values
     self.connect(self.tabWidget, QtCore.SIGNAL('currentChanged(int)'), self.updateConfigurables)
     self.updateConfigurables()
+
+
+  ## hand key presses to the annotationConfig widget
+  def keyPressEvent(self, e):
+    self.annotatorConfig.keyPressEvent(e)
+
+  ## hand key releases to the annotationConfig widget
+  def keyReleaseEvent(self, e):
+    self.annotatorConfig.keyReleaseEvent(e)
 
 
   def closeEvent(self, event):
@@ -238,7 +245,6 @@ class GraphicsLayoutWidget(Configurable):
 
       else:
         print "Error: ending label failed, no corresponding start"
-
 
 
   def __updateYLabels(self):
@@ -545,16 +551,21 @@ class LabelMeta:
     self.toggleMode = toggleMode
     self.state = False
 
+  def __str__(self):
+    return "Name: " + self.name + ", Key: " + str(self.key.toString()) + ", Descr: " + self.description
+
 
 
 ## Class managing the annotation configuration widget
-class AnnotationConfigWidget(QtCore.QObject, Configurable):
+class AnnotationConfigWidget(QtGui.QWidget, Configurable):
   #class AnnotationConfigWidget:
   keyPressSignal = pyqtSignal(tuple)
 
   ## Constructor
   def __init__(self, widget):
     super(AnnotationConfigWidget, self).__init__()
+    super(QtGui.QWidget, self).__init__()
+
     # get access to all elements in the annotation config qframe
     self.widget = widget
     self.tableWidget = widget.findChild(QtGui.QTableWidget, "keyTable")
@@ -580,7 +591,7 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
       f = open(path, "rb")
       self.annotatorConfig = pickle.load(f)
       print "Existing shortcuts loaded:"
-      for a in self.annotatorConfig:
+      for a in self.annotatorConfig.itervalues():
         print a
     except Exception:
       print "Error loading shortcut file"
@@ -590,6 +601,9 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
     # serialize config
     f = open(path, "wb")
     pickle.dump(self.annotatorConfig, f, pickle.HIGHEST_PROTOCOL)
+    print "Saved shortcuts:"
+    for a in self.annotatorConfig.itervalues():
+      print a
 
 
   def quit(self):
@@ -601,7 +615,62 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
       self.saveConfig("shortcuts.cfg")
 
 
-  ## Synchronizes the internal list with the displayed table
+  def keyPressEvent(self, e):
+    if e.key() in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Alt, QtCore.Qt.Key_Shift):
+      return # filter out modifier events
+
+    if e.isAutoRepeat():
+      return
+
+    keySeq = AnnotationConfigWidget.assembleKeySequence(e.key(), QtGui.QApplication.keyboardModifiers())
+
+    print "Pressed: " + keySeq.toString()
+
+    # search list of keymaps for this combination
+    for a in self.annotatorConfig.itervalues():
+      if a.key.toString() == keySeq.toString():
+        if a.toggleMode:
+          a.state = not a.state # toggle mode, thus toggle
+          self.keyPressSignal.emit((a.name, a.state)) # send out new label state
+        else:
+          if not a.state: # if previous state was "off"
+            self.keyPressSignal.emit((a.name, not a.state)) # send out new label state
+          a.state = True # hold mode, turn on / let it stay on
+
+
+  def keyReleaseEvent(self, e):
+    if e.key() in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Alt, QtCore.Qt.Key_Shift):
+      return # filter out modifier events
+
+    if e.isAutoRepeat():
+      return
+
+    keySeq = AnnotationConfigWidget.assembleKeySequence(e.key(), QtGui.QApplication.keyboardModifiers())
+
+    print "Released: " + keySeq.toString()
+
+    # search list of keymaps for this combination
+    for a in self.annotatorConfig.itervalues():
+      if a.key == keySeq:
+        if not a.toggleMode:
+          if a.state: # if previous state was "on"
+            self.keyPressSignal.emit((a.name, not a.state)) # send out new label state
+          a.state = False # hold mode, turn on / let it stay on
+
+
+
+  @staticmethod
+  def assembleKeySequence(key, mods):
+    keyMods = ''
+    if mods & QtCore.Qt.ControlModifier: keyMods += 'Ctrl+'
+    if mods & QtCore.Qt.AltModifier: keyMods += 'Alt+'
+    if mods & QtCore.Qt.ShiftModifier: keyMods += 'Shift+'
+    keySeq = QtGui.QKeySequence(key)
+    keySeq = QtGui.QKeySequence(keyMods + keySeq.toString())
+    return keySeq
+
+
+  ## Synchronizes the internal list with the displayed table and updates shotcuts
   def syncLists(self):
     # save sort column and order for sorting afterwards
     sortCol = self.tableWidget.horizontalHeader().sortIndicatorSection()
@@ -610,8 +679,7 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
     # clear table and reinsert all items
     self.tableWidget.clearContents()
     self.tableWidget.setRowCount(len(self.annotatorConfig))
-    for i,tup in enumerate(self.annotatorConfig.itervalues()):
-      v = tup
+    for i,v in enumerate(self.annotatorConfig.itervalues()):
       self.tableWidget.setItem(i,0,QtGui.QTableWidgetItem(v.name))
       self.tableWidget.setItem(i,1,QtGui.QTableWidgetItem(v.key.toString()))
       if v.toggleMode:
@@ -623,19 +691,17 @@ class AnnotationConfigWidget(QtCore.QObject, Configurable):
     # sort table again
     self.tableWidget.sortItems(sortCol, sortOrd)
 
-    # update key map
-    self.shortcuts = []
-    for v in self.annotatorConfig.itervalues():
-      self.shortcuts.append(QtGui.QShortcut(v.key, self.widget, lambda: self.__onShortcutEnable(v.key)))
 
 
-  ## pseudo slot for key presses. translates key press into label and status
+  ## pseudo slot for key presses. translates key press into label and status.
+  ## Contrary to the name, it also activates when the shortcut is turned off
   def __onShortcutEnable(self, keySeq):
+    print "Shortcut pressed: " + str(keySeq.toString())
     for label in self.annotatorConfig.itervalues():
       if label.key == keySeq:
-        print 'KeySeq: ' + str(keySeq.toString()) + ', label: ' + label.name + ', state: ' + str(label.state)
-        self.annotatorConfig[label.name].state = not label.state
-        self.keyPressSignal.emit((label.name, not label.state))
+        self.annotatorConfig[label.name].state = not label.state # turn on label
+        self.keyPressSignal.emit((label.name, label.state)) # send out new label state
+        print 'KeySeq: ' + str(keySeq.toString()) + ', label: ' + label.name + ', state is now: ' + str(label.state)
 
 
   def __onAddKey(self):
@@ -743,7 +809,6 @@ class Annotator(QtCore.QObject):
       print 'Error: No sensor data!'
       return
 
-
     # start a new label area or end a started one
     if data[1]: # label start
       self.annotations.append(Label(data[0], numSamples, -1)) # create new label that is open to the right
@@ -759,16 +824,11 @@ class Annotator(QtCore.QObject):
       else:
         print "Annotator Error: ending label failed, no corresponding start"
 
-    print "num annots: " + str(len(self.annotations)) + " , tuple: " + str(data)
-
-
 
   def writeAnnotatedData(self):
     if not self.annotations:
       return
 
-
-    print "annotation is written"
 
     # create "empty" labels
     outLabels = ["other" for i in range(self.data.shape[1])]
@@ -783,8 +843,6 @@ class Annotator(QtCore.QObject):
     for i in range(self.data.shape[1]):
       nums = self.data[:,i].tolist()
       outData += outLabels[i] + ' ' + ' '.join(map(str, nums)) + '\n'
-
-    print "numData: " + str(self.data.shape[1]) + "lenOutData: " + str(len(outData))
 
     # open file and write
     outFile = open(self.outFilePath, 'w')
