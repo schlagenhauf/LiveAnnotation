@@ -66,8 +66,18 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         # create all modules
         self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
 
-        dp.start(1000 / 50)
-        dp.connect(self.plotter.dataSlot)
+        dp.obj.start(1000 / 50)
+        dp.obj.connect(self.plotter.dataSlot)
+
+    def keyPressEvent(self, e):
+        if e.isAutoRepeat():
+            return
+        self.plotter.keyPressEvent(e)
+
+    def keyReleaseEvent(self, e):
+        if e.isAutoRepeat():
+            return
+        self.plotter.keyReleaseEvent(e)
 
 
 # Plottable label container
@@ -92,14 +102,12 @@ class PlotLabel(Label):
 # Widget managing plotting
 class GraphicsLayoutWidget(Configurable):
     def __init__(self, widget):  # create plot window self.w = widget
-        print "bla_ctor"
         self.plots = []
         self.w = widget
 
         self.yLabels = []  # names of each sensor dimension
         self.annotations = []  # list of plotlabel containers
-        # a matrix containing data for each dimension per row
-        self.data = np.zeros((0, 0))
+        self.data = np.zeros((0, 0)) # a matrix containing data for each dimension per row
 
         self.statusLabel = self.w.parent().findChild(QtGui.QLabel, "labelPlotStatus")
 
@@ -108,10 +116,21 @@ class GraphicsLayoutWidget(Configurable):
         self.rate = 50
 
         self.lastTime = time.time()
-        self.deltaTime = 0
+        self.meanHorizonSize = [0 for i in range(0,50)]
+
+        self.skipCounter = 0
+
+        # set timer for update
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.update)
+        self.timer.start(1000 / 20)
+
 
     def update(self):
         numSamples = self.data.shape[1]
+
+        # delete labels that are not visible anymore
+        self.annotations = [l for l in self.annotations if l.endIdx > (numSamples - self.xLimit) or l.endIdx == -1]
 
         self.__updateNumberOfPlots()
 
@@ -123,15 +142,16 @@ class GraphicsLayoutWidget(Configurable):
 
         self.__updateClassLabels()
 
-        app.processEvents()  # force complete redraw for every plot
+        #app.processEvents()  # force complete redraw for every plot
 
         # calculate delta t
         thisTime = time.time()
         newDeltaTime = thisTime - self.lastTime
-        meanDeltaTime = (self.deltaTime + newDeltaTime) / 2
-        self.deltaTime = newDeltaTime
+        self.meanHorizonSize.append(newDeltaTime)
+        del self.meanHorizonSize[0]
         self.lastTime = thisTime
-        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz".format(meanDeltaTime * 1000, 1 / meanDeltaTime))
+        meanDeltaTime = sum(self.meanHorizonSize) / len(self.meanHorizonSize)
+        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: {:.2f}, Number of Data Points: {}".format(meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, self.data.shape[1]))
 
 
     def configure(self, config):
@@ -147,27 +167,24 @@ class GraphicsLayoutWidget(Configurable):
         for cl in self.annotations:
             if not cl.linReg:
                 for pl in self.plots:
-                    linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
-                    linReg.setZValue(-10)
+                    #linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
+                    linReg = QtGui.QGraphicsRectItem(cl.startIdx, -10, cl.endIdx - cl.startIdx, 20)
+                    linReg.setPen(QtGui.QColor(255,0,0))
+                    brush = QtGui.QBrush(QtCore.Qt.SolidPattern)
+                    brush.setColor(QtGui.QColor(128,128,128,100))
+                    linReg.setBrush(brush)
+
                     pl.addItem(linReg)
                     cl.linReg.append(linReg)
 
             # update bounds if necessary
-            if [cl.startIdx, cl.endIdx] != cl.linReg[0].getRegion():
+            #if [cl.startIdx, cl.endIdx] != cl.linReg[0].getRegion():
+            if [cl.startIdx, cl.endIdx] != [cl.linReg[0].rect().x, cl.linReg[0].rect().width]:
                 endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
                 for lr in cl.linReg:
-                    lr.setRegion([cl.startIdx, endIdx])
+                    #lr.setRegion([cl.startIdx, endIdx])
+                    lr.setRect(cl.startIdx, -10, endIdx - cl.startIdx, 20)
 
-        self.__setStatusLabel()
-
-    def __setStatusLabel(self):
-        numSamples = self.data.shape[1]
-        visibleSamples = self.xLimit if numSamples > self.xLimit else numSamples
-        #self.statusLabel.setText('Samples: ' + str(numSamples) + ' [' + str(visibleSamples) + ' visible]')
-
-    def setYLabels(self, labels):
-        self.labels = labels
-        self.__updateYLabels()
 
     # slot for appending new data
     @pyqtSlot(tuple)
@@ -186,7 +203,6 @@ class GraphicsLayoutWidget(Configurable):
         # append
         self.data = np.hstack((self.data, ndata))
 
-        self.update()
 
     # slot for reacting to newly annotated labels
     @pyqtSlot(tuple)
@@ -213,18 +229,6 @@ class GraphicsLayoutWidget(Configurable):
             else:
                 print "Error: ending label failed, no corresponding start"
 
-        print "Plotter: Num Annotations: " + str(len(self.annotations)) + ", Num Plots: " + str(len(self.plots))
-        for pl in self.plots:
-            print "\tNumber of plot elements: " + str(len(pl.items))
-            #print inspect.getmembers(pl.listDataItems()[0])
-
-
-
-    def __updateYLabels(self):
-        # assign y axis labels (if more/less labels are given, list is
-        # truncated accordingly)
-        for p, l in zip(self.plots, self.yLabels):
-            p.setLabel('left', l)
 
     def __updateNumberOfPlots(self):
         numDims = self.data.shape[0]
@@ -234,7 +238,15 @@ class GraphicsLayoutWidget(Configurable):
             self.plots[-1].showGrid(True, True)
             self.w.nextRow()
 
-        self.__updateYLabels()
+
+    def keyPressEvent(self, e):
+      if e.key() == QtCore.Qt.Key_A:
+        self.onShortcutEnable(("default", True))
+
+
+    def keyReleaseEvent(self, e):
+      if e.key() == QtCore.Qt.Key_A:
+        self.onShortcutEnable(("default", False))
 
 
 
