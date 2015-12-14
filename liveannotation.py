@@ -44,18 +44,6 @@ main_form = uic.loadUiType("la.ui")[0]
 dialog_form = uic.loadUiType("ad.ui")[0]
 
 
-# Interface for all modules that have adjustable values
-class Configurable():
-    # Set default values
-
-    def configure(self):
-        pass
-
-    # Set values from the config module
-    def configure(self, config):
-        pass
-
-
 # Top level class for main window and module instances
 class LiveAnnotation(QtGui.QMainWindow, main_form):
 
@@ -106,11 +94,10 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
     # only use getConfigValue here, to ensure that all values are updated
     def updateConfigurables(self):
         print 'Reconfiguring all modules'
-        #self.stream.updatePipeline(self.config.getConfigValue('Video Source'))
         self.stream.configure(self.config)
-        # self.plotter.configure(self.config)
-        # self.annotatorConfig.configure(self.config)
-        # self.annotator.configure(self.config)
+        self.plotter.configure(self.config)
+        self.annotatorConfig.configure(self.config)
+        self.annotator.configure(self.config)
 
 
 # Plottable label container
@@ -133,14 +120,16 @@ class PlotLabel(Label):
 
 
 # Widget managing plotting
-class GraphicsLayoutWidget(Configurable):
+class GraphicsLayoutWidget:
+
     def __init__(self, widget):  # create plot window self.w = widget
         self.plots = []
         self.w = widget
 
         self.yLabels = []  # names of each sensor dimension
         self.annotations = []  # list of plotlabel containers
-        self.data = np.zeros((0, 0)) # a matrix containing data for each dimension per row
+        # a matrix containing data for each dimension per row
+        self.data = np.zeros((0, 0))
 
         self.statusLabel = self.w.parent().findChild(QtGui.QLabel, "labelPlotStatus")
 
@@ -149,7 +138,7 @@ class GraphicsLayoutWidget(Configurable):
         self.rate = 50
 
         self.lastTime = time.time()
-        self.meanHorizonSize = [0 for i in range(0,50)]
+        self.meanHorizonSize = [0 for i in range(0, 50)]
 
         self.skipCounter = 0
 
@@ -158,12 +147,12 @@ class GraphicsLayoutWidget(Configurable):
         self.timer.timeout.connect(self.update)
         self.timer.start(1000 / 20)
 
-
     def update(self):
         numSamples = self.data.shape[1]
 
         # delete labels that are not visible anymore
-        self.annotations = [l for l in self.annotations if l.endIdx > (numSamples - self.xLimit) or l.endIdx == -1]
+        self.annotations = [l for l in self.annotations if l.endIdx > (
+            numSamples - self.xLimit) or l.endIdx == -1]
 
         self.__updateNumberOfPlots()
 
@@ -172,10 +161,9 @@ class GraphicsLayoutWidget(Configurable):
             if self.xLimit < numSamples:
                 pl.setXRange(numSamples - self.xLimit, numSamples)
 
-
         self.__updateClassLabels()
 
-        #app.processEvents()  # force complete redraw for every plot
+        # app.processEvents()  # force complete redraw for every plot
 
         # calculate delta t
         thisTime = time.time()
@@ -184,11 +172,11 @@ class GraphicsLayoutWidget(Configurable):
         del self.meanHorizonSize[0]
         self.lastTime = thisTime
         meanDeltaTime = sum(self.meanHorizonSize) / len(self.meanHorizonSize)
-        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: {:.2f}, Number of Data Points: {}".format(meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, self.data.shape[1]))
-
+        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: {:.2f}, Number of Data Points: {}".format(
+            meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, self.data.shape[1]))
 
     def configure(self, config):
-        self.xLimit = config.getConfigValue('XLimit')
+        #self.xLimit = config.getConfigValue('XLimit')
         self.rate = config.getConfigValue('Data Sample Rate')
 
     def quit(self):
@@ -201,17 +189,18 @@ class GraphicsLayoutWidget(Configurable):
             if not cl.linReg:
                 for pl in self.plots:
                     #linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
-                    linReg = QtGui.QGraphicsRectItem(cl.startIdx, -10, cl.endIdx - cl.startIdx, 20)
-                    linReg.setPen(QtGui.QColor(255,0,0))
+                    linReg = QtGui.QGraphicsRectItem(
+                        cl.startIdx, -10, cl.endIdx - cl.startIdx, 20)
+                    linReg.setPen(QtGui.QColor(255, 0, 0))
                     brush = QtGui.QBrush(QtCore.Qt.SolidPattern)
-                    brush.setColor(QtGui.QColor(128,128,128,100))
+                    brush.setColor(QtGui.QColor(128, 128, 128, 100))
                     linReg.setBrush(brush)
 
                     pl.addItem(linReg)
                     cl.linReg.append(linReg)
 
             # update bounds if necessary
-            #if [cl.startIdx, cl.endIdx] != cl.linReg[0].getRegion():
+            # if [cl.startIdx, cl.endIdx] != cl.linReg[0].getRegion():
             if [cl.startIdx, cl.endIdx] != [cl.linReg[0].rect().x, cl.linReg[0].rect().width]:
                 endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
                 for lr in cl.linReg:
@@ -246,7 +235,6 @@ class GraphicsLayoutWidget(Configurable):
         # append
         self.data = np.hstack((self.data, ndata))
 
-
     # slot for reacting to newly annotated labels
     @pyqtSlot(tuple)
     def onShortcutEnable(self, data):
@@ -272,7 +260,6 @@ class GraphicsLayoutWidget(Configurable):
             else:
                 print "Error: ending label failed, no corresponding start"
 
-
     def __updateNumberOfPlots(self):
         numDims = self.data.shape[0]
         while len(self.plots) < numDims:
@@ -280,7 +267,6 @@ class GraphicsLayoutWidget(Configurable):
             self.plots[-1].plot()
             self.plots[-1].showGrid(True, True)
             self.w.nextRow()
-
 
 
 # GStreamer video secording and display Wrapper
@@ -333,6 +319,10 @@ class VideoWrapper:
         state += "Ready, " if self.isReady else "Not Ready, "
         state += "Recording, " if self.isRecording else "Not Recording, "
         return state
+
+    def setSource(self, source):
+        self.source = source
+        self.__updatePipeline()
 
     # Creates / updates the GStreamer pipeline according to the currently set
     # state
@@ -390,8 +380,7 @@ class VideoWrapper:
 
 
 # Widget managing video stream
-class VideoWidget(Configurable):
-    # Constructor
+class VideoWidget:
 
     def __init__(self, widget):
         self.widget = widget
@@ -424,7 +413,7 @@ class VideoWidget(Configurable):
     # Configurable member
     def configure(self, config):
         self.fileOutPath = config.getConfigValue('Video Output Path')
-        self.source = config.getConfigValue('Video Source')
+        self.wrapper.setSource(config.getConfigValue('Video Source'))
 
     # Sets the status label text with the current module status
     def __updateStatusLabel(self):
@@ -433,33 +422,35 @@ class VideoWidget(Configurable):
 
 # Widget populating and reading configuration
 class ParameterTreeWidget(QtCore.QObject):
-    # Constructor
 
     def __init__(self, parameterView):
         super(ParameterTreeWidget, self).__init__()
         defaultParams = [
             {'name': 'General', 'type': 'group', 'children': [
                 {'name': 'Config Path', 'type': 'str', 'value': "config.cfg"},
+            ]},
+            {'name': 'Video', 'type': 'group', 'children': [
+                {'name': 'Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "videotestsrc", 'children': [
+                    {'name': 'Network Source IP', 'type': 'str', 'value': "127.0.0.1"},
+                ]},
+                {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Output file', 'type': 'str', 'value': "outvideo.mp4"},
+                {'name': 'When already exists', 'type': 'list', 'values' : {"Overwrite" : "overwrite", "Append" : "append", "Enumerate" : "enumerate"}, 'value' : "overwrite"},
+            ]},
+            {'name': 'Annotation', 'type': 'group', 'children': [
+                {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Allow multiple labels at once', 'type': 'bool', 'value': False},
+                {'name': 'Output file name', 'type': 'str', 'value': "annotationOut.txt"},
                 {'name': 'Save Key Maps', 'type': 'bool', 'value': True},
                 {'name': 'Key Map Save File', 'type': 'str', 'value': "keymap.cfg"},
                 {'name': 'Data Output Target', 'type': 'list', 'values': {
-                    "File": "file", "Standard Output": "stdout"}, 'value': "Standard Output"},
+                    "File": "file", "Standard Output": "stdout"}, 'value': "file"},
                 {'name': 'Data Output Filename', 'type': 'str',
                  'value': "annotated_data.txt"},
             ]},
-            {'name': 'Video', 'type': 'group', 'children': [
-                {'name': 'Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "Test Source", 'children': [
-                    {'name': 'Network Source IP',
-                        'type': 'str', 'value': "127.0.0.1"},
-                ]},
-                {'name': 'Sample Rate', 'type': 'float',
-                    'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
-            ]},
-            {'name': 'Annotation', 'type': 'group', 'children': [
-                {'name': 'Sample Rate', 'type': 'float',
-                 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
-                {'name': 'Displayed Samples (0 for all)',
-                    'type': 'int', 'value': 500},
+            {'name': 'Plotting', 'type': 'group', 'children': [
+                {'name': 'Displayed Samples (0 for all)', 'type': 'int', 'value': 500},
+                {'name': 'Display Rate', 'type': 'float', 'value': 2e1, 'siPrefix': True, 'suffix': 'Hz'},
             ]},
         ]
 
@@ -504,7 +495,6 @@ class ParameterTreeWidget(QtCore.QObject):
 
 # Subwindow to add / modify a new label type
 class AddEntryDialog(QtGui.QDialog, dialog_form):
-    # Constructor
 
     def __init__(self, args, parent):
         QtGui.QDialog.__init__(self, parent)
@@ -564,7 +554,6 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
 
 # Container for label information
 class LabelMeta:
-    # Constructor
 
     def __init__(self, name="", key=None, description="", toggleMode=True):
         self.name = name
@@ -578,7 +567,7 @@ class LabelMeta:
 
 
 # Class managing the annotation configuration widget
-class AnnotationConfigWidget(QtGui.QWidget, Configurable):
+class AnnotationConfigWidget(QtGui.QWidget):
     # class AnnotationConfigWidget:
     keyPressSignal = pyqtSignal(tuple)
 
@@ -795,6 +784,9 @@ class Annotator(QtCore.QObject):
         self.annotations = []  # list of touples containing label, index, and start/stop flag
         self.data = np.zeros((0, 0))
         self.outFilePath = 'annotationOut.txt'
+
+    def configure(self, config):
+        pass
 
     def quit(self):
         # write annotation data
