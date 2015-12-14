@@ -79,6 +79,7 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
 
         dp.obj.start(1000 / 50)
         dp.obj.connect(self.plotter.dataSlot)
+        dp.obj.connect(self.annotator.dataSlot)
 
         # set all config values
         self.connect(self.tabWidget, QtCore.SIGNAL(
@@ -249,12 +250,11 @@ class GraphicsLayoutWidget(Configurable):
     # slot for reacting to newly annotated labels
     @pyqtSlot(tuple)
     def onShortcutEnable(self, data):
-        print "Bla"
         numSamples = self.data.shape[1]
 
         # trigger corresponding label
         if numSamples == 0:
-            print 'Error: No sensor data!'
+            print 'Plotter Error: No sensor data!'
             return
 
         # start a new label area or end a started one
@@ -371,7 +371,8 @@ class VideoWrapper:
         self.isReady = True
         print "EOS"
 
-    # GStreamer Callback for error messages def __onError(self, bus, message):
+    # GStreamer Callback for error messages
+    def __onError(self, bus, message):
         err, debug = message.parse_error()
         print "Error: %s" % err, debug
         self.pl.set_state(Gst.State.NULL)
@@ -823,7 +824,7 @@ class Annotator(QtCore.QObject):
 
         # trigger corresponding label
         if numSamples == 0:
-            print 'Error: No sensor data!'
+            print 'Annotator Error: No sensor data!'
             return
 
         # start a new label area or end a started one
