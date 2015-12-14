@@ -57,5 +57,9 @@ docs/_build/
 # PyBuilder
 target/
 
+# Glade
+*.glade
+*.glade~
+
 # Vim
 *.swp
