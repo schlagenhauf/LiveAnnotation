@@ -279,19 +279,24 @@ class VideoWrapper:
         self.isReady = True
 
         self.targetWin = targetWin
+        #self.winId = self.targetWin.winId()
+        #print winId
         self.fileOutPath = ""
         self.source = "videotestsrc"
 
     # If not already running / ready / not recording, create a new pipeline
     # and start it
     def play(self):
-        if self.isRunning or not self.isReady or self.isRecording:
+        #if self.isRunning or not self.isReady or self.isRecording:
+        if self.isRunning or not self.isReady:
             return
 
         self.isRunning = True
         self.__updatePipeline()
         self.pl.set_state(Gst.State.PLAYING)
+        print "Start playing"
 
+    #
     # If currently running, stop the pipeline and set to not ready
     def stop(self):
         if self.isRunning:
@@ -299,20 +304,29 @@ class VideoWrapper:
             self.isReady = False
             self.isRecording = False
             self.pl.send_event(Gst.Event.new_eos())
+        print "Stop playing"
 
     # Turns the recording on or off, depending on the previous state. Only
     # allowed when running
     def toggleRec(self):
-        if not self.isRunning or not self.isReady:
+        print "Toggle Recording, is now: " + str("on" if not self.isRecording else "off")
+        #if not self.isRunning or not self.isReady:
+        if not self.isReady:
             return
 
         if not self.isRecording:
             self.isRecording = True
-            self.play()
+            self.__updatePipeline()
         else:
             self.isRecording = False
-            self.isReady = False
-            self.pl.send_event(Gst.Event.new_eos())
+            if self.pl:
+                self.isReady = False
+                self.pl.send_event(Gst.Event.new_eos())
+                print "\tSent EOS"
+            else:
+                self.isReady = True
+                print "\tStopped recording, but stream was not playing anyway"
+
 
     def getStateStr(self):
         state = "Running, " if self.isRunning else "Halted, "
@@ -322,20 +336,25 @@ class VideoWrapper:
 
     def setSource(self, source):
         self.source = source
-        self.__updatePipeline()
+        #self.__updatePipeline()
 
     # Creates / updates the GStreamer pipeline according to the currently set
     # state
     def __updatePipeline(self):
+        print "Updating Pipeline, isReady: {}, isRunning: {}, isRecording: {} ".format(self.isReady, self.isRunning, self.isRecording)
         if self.pl:
             self.pl.set_state(Gst.State.NULL)
+            self.pl = []
+
         pipeString = ""
         if self.isRecording:
-            pipeString = self.source + \
-                " ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=./outvid01 async=0 t. ! queue ! autovideosink"
+        #    pipeString = self.source + \
+        #        " ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink"
+            pipeString = "videotestsrc ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink"
         else:
             pipeString = self.source + " ! autovideosink"
 
+        print "\tPipeline String: " + pipeString
         self.pl = Gst.parse_launch(pipeString)
 
         # intercept sync messages so we can set in which window to draw in
@@ -346,20 +365,28 @@ class VideoWrapper:
         bus.connect("message::error", self.__onError)
         bus.connect("sync-message::element", self.__onSyncMessage)
 
+        if self.isRunning:
+            self.pl.set_state(Gst.State.PLAYING)
+        else:
+            self.pl.set_state(Gst.State.NULL)
+
+        print "\tWinID: " + str(self.targetWin.winId())
+
     # GStreamer Callback for end of stream messages
     def __onEos(self, bus, message):
+        print "Received EOS"
         self.pl.set_state(Gst.State.NULL)
 
         # if we got here by stopping the recording, update the pipeline and
         # start again
-        if self.isRunning:
-            self.__updatePipeline()
-            self.play()
-        else:
-            self.pl = None
+        #if self.isRunning:
+        #    self.__updatePipeline()
+        #    self.play()
+        #else:
+        #    self.pl = None
+        self.pl = None
 
         self.isReady = True
-        print "EOS"
 
     # GStreamer Callback for error messages
     def __onError(self, bus, message):
