@@ -778,7 +778,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
             return
 
         label = str(self.tableWidget.item(row, 0).text())
-        lmOld = self.annotatorConfig[label][0]
+        lmOld = self.annotatorConfig[label]
 
         # open dialog window
         dialog = AddEntryDialog(args=[], parent=self.widget)
@@ -813,7 +813,12 @@ class Annotator(QtCore.QObject):
         self.outFilePath = 'annotationOut.txt'
 
     def configure(self, config):
-        pass
+        self.sampleRate = config.getConfigValue('Sample Rate')
+        self.allowMultiLabel = config.getConfigValue('Allow Multiple Labels')
+        self.outFilePath = config.getConfigValue('Output File Name')
+        self.saveKeyMaps = config.getConfigValue('Save Key Maps')
+        self.keyMapPath = config.getConfigValue('Key Map Save File')
+        self.output = config.getConfigValue('Data Output Target')
 
     def quit(self):
         # write annotation data
