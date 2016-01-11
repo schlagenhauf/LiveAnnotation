@@ -50,12 +50,14 @@ class DataParser(QtCore.QObject):
             line = self.source.readline()
             if line:
                 # read space separated data fields
-                fields = line.split(' ')
-                nums = [float(i) for i in fields[1:]]
+                fields = line.split('\t')
+                print fields
+                nums = [float(i) for i in fields[1:-2]]
                 data = (fields[0], nums)
 
                 # emit signal
                 self.newData.emit(data)
+
             else:
                 print "Warning: No sample collected in this time frame. Getting out of sync."
 

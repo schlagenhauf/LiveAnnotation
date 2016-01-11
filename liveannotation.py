@@ -166,11 +166,11 @@ class GraphicsLayoutWidget:
         del self.meanHorizonSize[0]
         self.lastTime = thisTime
         meanDeltaTime = sum(self.meanHorizonSize) / len(self.meanHorizonSize)
-        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: {:.2f} ms / {:.2f} Hz, Number of Data Points: {}".format(
-            meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, 1 / dp.obj.meanDeltaTime, self.data.shape[1]))
+        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: {:.2f} ms, Number of Data Points: {}".format(
+            meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, self.data.shape[1]))
 
     def configure(self, config):
-        #self.xLimit = config.getConfigValue('XLimit')
+        self.xLimit = config.getConfigValue('Displayed Samples')
         self.rate = config.getConfigValue('Refresh Rate')
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update)
@@ -472,7 +472,7 @@ class ParameterTreeWidget(QtCore.QObject):
                  'value': "annotated_data.txt"},
             ]},
             {'name': 'Plotting', 'type': 'group', 'children': [
-                {'name': 'Displayed Samples (0 for all)', 'type': 'int', 'value': 500},
+                {'name': 'Displayed Samples', 'type': 'int', 'value': 500},
                 {'name': 'Refresh Rate', 'type': 'float', 'value': 2e1, 'siPrefix': True, 'suffix': 'Hz'},
             ]},
         ]
