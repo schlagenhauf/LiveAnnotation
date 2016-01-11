@@ -20,23 +20,13 @@ import numpy as np
 import dataparser as dp
 
 
-# Gui to Annotator:
-#   labeling changes
-#   config
-#   saving of labels
-#   new label keys
-#   key presses
-# Annotator to Gui:
-#   Sensor data
-#   Labels
 
 ### TODOS ###
-# - stop label when corresponding shortcut is deleted
-# - fix performance issue
-# - enable configuration
-# - add status string under video / plotter
-# - get video with compression to work
-# - "null pointer passed" error at shutdown
+# - fix performance issue (fixed?)
+# - enable configuration (WIP)
+# - add status string under video / plotter (determine what is needed)
+# - "null pointer passed" error at shutdown (gone? now "thread destroyed while still running")
+
 
 # Application GUI
 
@@ -98,6 +88,10 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         self.plotter.configure(self.config)
         self.annotatorConfig.configure(self.config)
         self.annotator.configure(self.config)
+        dp.obj.stop()
+        dp.obj.start(1000 / self.config.getConfigValue("Data Sample Rate"))
+        dp.obj.connect(self.plotter.dataSlot)
+        dp.obj.connect(self.annotator.dataSlot)
 
 
 # Plottable label container
@@ -172,12 +166,15 @@ class GraphicsLayoutWidget:
         del self.meanHorizonSize[0]
         self.lastTime = thisTime
         meanDeltaTime = sum(self.meanHorizonSize) / len(self.meanHorizonSize)
-        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: {:.2f}, Number of Data Points: {}".format(
-            meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, self.data.shape[1]))
+        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: {:.2f} ms / {:.2f} Hz, Number of Data Points: {}".format(
+            meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, 1 / dp.obj.meanDeltaTime, self.data.shape[1]))
 
     def configure(self, config):
         #self.xLimit = config.getConfigValue('XLimit')
-        self.rate = config.getConfigValue('Data Sample Rate')
+        self.rate = config.getConfigValue('Refresh Rate')
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.update)
+        self.timer.start(1000 / self.rate)
 
     def quit(self):
         for p in self.plots:
@@ -460,14 +457,13 @@ class ParameterTreeWidget(QtCore.QObject):
                 {'name': 'Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "videotestsrc", 'children': [
                     {'name': 'Network Source IP', 'type': 'str', 'value': "127.0.0.1"},
                 ]},
-                {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Frame Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
                 {'name': 'Output file', 'type': 'str', 'value': "outvideo.mp4"},
                 {'name': 'When already exists', 'type': 'list', 'values' : {"Overwrite" : "overwrite", "Append" : "append", "Enumerate" : "enumerate"}, 'value' : "overwrite"},
             ]},
             {'name': 'Annotation', 'type': 'group', 'children': [
-                {'name': 'Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Data Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
                 {'name': 'Allow multiple labels at once', 'type': 'bool', 'value': False},
-                {'name': 'Output file name', 'type': 'str', 'value': "annotationOut.txt"},
                 {'name': 'Save Key Maps', 'type': 'bool', 'value': True},
                 {'name': 'Key Map Save File', 'type': 'str', 'value': "keymap.cfg"},
                 {'name': 'Data Output Target', 'type': 'list', 'values': {
@@ -477,7 +473,7 @@ class ParameterTreeWidget(QtCore.QObject):
             ]},
             {'name': 'Plotting', 'type': 'group', 'children': [
                 {'name': 'Displayed Samples (0 for all)', 'type': 'int', 'value': 500},
-                {'name': 'Display Rate', 'type': 'float', 'value': 2e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Refresh Rate', 'type': 'float', 'value': 2e1, 'siPrefix': True, 'suffix': 'Hz'},
             ]},
         ]
 
@@ -531,9 +527,10 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
         self.listenForKeyPress = False
 
         # connect ok / cancel buttons
-        self.btnRecShortcut.released.connect(self.__onRecKey)
-        self.buttonBox.accepted.connect(self.__onAccept)
-        self.buttonBox.rejected.connect(self.__onReject)
+        self.btnRecShortcut.released.connect(self.onRecKey)
+        self.buttonBox.accepted.connect(self.onAccept)
+        self.buttonBox.rejected.connect(self.onReject)
+        #self.connect(buttonBox, QtCore.SIGNAL("accepted()"), self.onAccept, QtCore.SLOT("accept()"))
 
     # Setter for filling in values when modifying
     def setValues(self, lm):
@@ -544,7 +541,7 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
         self.editDescription.setText(lm.description)
 
     # Records a modifier + key shortcut
-    def __onRecKey(self):
+    def onRecKey(self):
         # prompt the user to enter a shortcut
         self.editKeyMap.setText("Press key...")
 
@@ -569,13 +566,18 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
             self.listenForKeyPress = False
 
     # reads out the forms and returns LabelMeta instance
-    def __onAccept(self):
-        self.lm = LabelMeta(str(self.editName.text()), QtGui.QKeySequence(self.editKeyMap.text(
-        )), str(self.editDescription.toPlainText()), self.radioToggle.isChecked())
-        self.accept()
+    def onAccept(self):
+        if not str(self.editName.text()).isalnum():
+            errdiag = QtGui.QErrorMessage()
+            errdiag.showMessage("Invalid label name. Only alphanumerical characters are allowed.")
+
+        else:
+            self.lm = LabelMeta(str(self.editName.text()), QtGui.QKeySequence(self.editKeyMap.text(
+            )), str(self.editDescription.toPlainText()), self.radioToggle.isChecked())
+            self.accept()
 
     # just close the window
-    def __onReject(self):
+    def onReject(self):
         self.close()
 
 
@@ -758,10 +760,18 @@ class AnnotationConfigWidget(QtGui.QWidget):
         if row == -1:
             return
 
-        # delete table widget item and dict item
+        # get label
         label = str(self.tableWidget.item(row, 0).text())
+
+        # stop annotation if the label is currently active
+        if self.annotatorConfig[label].state:
+            self.keyPressSignal.emit((label, not self.annotatorConfig[label].state))  # send out new label state
+
+        # delete table widget item and dict item
         del(self.annotatorConfig[label])
         self.syncLists()
+
+
 
     def __onModKey(self):
         # get currently selected item and open the additem dialog
@@ -809,7 +819,7 @@ class Annotator(QtCore.QObject):
     def configure(self, config):
         self.sampleRate = config.getConfigValue('Sample Rate')
         self.allowMultiLabel = config.getConfigValue('Allow Multiple Labels')
-        self.outFilePath = config.getConfigValue('Output File Name')
+        self.outFilePath = config.getConfigValue('Data Output Filename')
         self.saveKeyMaps = config.getConfigValue('Save Key Maps')
         self.keyMapPath = config.getConfigValue('Key Map Save File')
         self.output = config.getConfigValue('Data Output Target')
