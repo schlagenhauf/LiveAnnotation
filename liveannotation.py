@@ -20,11 +20,11 @@ import numpy as np
 import dataparser as dp
 
 
-
 ### TODOS ###
 # - fix performance issue (fixed?)
 # - enable configuration (WIP)
-# - add status string under video / plotter (determine what is needed)
+# - stream video over network
+# - add status string under video / plotter (determine what is needed / useful)
 # - "null pointer passed" error at shutdown (gone? now "thread destroyed while still running")
 
 
@@ -81,15 +81,16 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         event.accept()
 
     # Sets all config values again (e.g. after changing the config)
-    # only use getConfigValue here, to ensure that all values are updated
+    # only use getValue here, to ensure that all values are updated
     def updateConfigurables(self):
         print 'Reconfiguring all modules'
         self.stream.configure(self.config)
         self.plotter.configure(self.config)
         self.annotatorConfig.configure(self.config)
+        self.stream.configure(self.config)
         self.annotator.configure(self.config)
         dp.obj.stop()
-        dp.obj.start(1000 / self.config.getConfigValue("Data Sample Rate"))
+        dp.obj.start(1000 / self.config.getValue("Data Sample Rate"))
         dp.obj.connect(self.plotter.dataSlot)
         dp.obj.connect(self.annotator.dataSlot)
 
@@ -170,8 +171,8 @@ class GraphicsLayoutWidget:
             meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, self.data.shape[1]))
 
     def configure(self, config):
-        self.xLimit = config.getConfigValue('Displayed Samples')
-        self.rate = config.getConfigValue('Refresh Rate')
+        self.xLimit = config.getValue('PlottedSamples')
+        self.rate = config.getValue('PlotterRefreshRate')
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update)
         self.timer.start(1000 / self.rate)
@@ -335,6 +336,12 @@ class VideoWrapper:
         self.source = source
         #self.__updatePipeline()
 
+    def setIP(self, ip):
+        self.ip = ip
+
+    def setFramerate(self, framerate):
+        self.framerate = framerate
+
     # Creates / updates the GStreamer pipeline according to the currently set
     # state
     def __updatePipeline(self):
@@ -436,8 +443,11 @@ class VideoWidget:
 
     # Configurable member
     def configure(self, config):
-        self.fileOutPath = config.getConfigValue('Video Output Path')
-        self.wrapper.setSource(config.getConfigValue('Video Source'))
+        self.fileOutPath = config.getValue('VideoOutputFile')
+        self.filePolicy = config.getValue('VideoOutputFilePolicy')
+        self.wrapper.setSource(config.getValue('GStreamerVideoSource'))
+        self.wrapper.setIP(config.getValue('NetworkSourceIP'))
+        self.wrapper.setFramerate(config.getValue('VideoFrameRate'))
 
     # Sets the status label text with the current module status
     def __updateStatusLabel(self):
@@ -451,31 +461,31 @@ class ParameterTreeWidget(QtCore.QObject):
         super(ParameterTreeWidget, self).__init__()
         defaultParams = [
             {'name': 'General', 'type': 'group', 'children': [
-                {'name': 'Config Path', 'type': 'str', 'value': "config.cfg"},
+                {'name': 'General Config File Path', 'type': 'str', 'value': "config.cfg"},
             ]},
             {'name': 'Video', 'type': 'group', 'children': [
-                {'name': 'Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "videotestsrc", 'children': [
+                {'name': 'GStreamer Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "videotestsrc", 'children': [
                     {'name': 'Network Source IP', 'type': 'str', 'value': "127.0.0.1"},
                 ]},
-                {'name': 'Frame Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
-                {'name': 'Output file', 'type': 'str', 'value': "outvideo.mp4"},
-                {'name': 'When already exists', 'type': 'list', 'values' : {"Overwrite" : "overwrite", "Append" : "append", "Enumerate" : "enumerate"}, 'value' : "overwrite"},
+                {'name': 'Video Frame Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Video Output File', 'type': 'str', 'value': "outvideo.mp4"},
+                {'name': 'Video Output File Policy', 'type': 'list', 'values' : {"Overwrite" : "overwrite", "Append" : "append", "Enumerate" : "enumerate"}, 'value' : "overwrite"},
             ]},
             {'name': 'Annotation', 'type': 'group', 'children': [
                 {'name': 'Data Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
-                {'name': 'Allow multiple labels at once', 'type': 'bool', 'value': False},
-                {'name': 'Save Key Maps', 'type': 'bool', 'value': True},
-                {'name': 'Key Map Save File', 'type': 'str', 'value': "keymap.cfg"},
-                {'name': 'Data Output Target', 'type': 'list', 'values': {
+                {'name': 'Concurrent Labels', 'type': 'bool', 'value': False},
+                {'name': 'Save Annotator Key Mapping', 'type': 'bool', 'value': True},
+                {'name': 'Annotator Key Mapping Save File', 'type': 'str', 'value': "keymap.cfg"},
+                {'name': 'Annotator Data Output Target', 'type': 'list', 'values': {
                     "File": "file", "Standard Output": "stdout"}, 'value': "file"},
-                {'name': 'Data Output Filename', 'type': 'str',
-                 'value': "annotated_data.txt"},
+                {'name': 'Data Output Filename', 'type': 'str', 'value': "annotated_data.txt"},
             ]},
             {'name': 'Plotting', 'type': 'group', 'children': [
-                {'name': 'Displayed Samples', 'type': 'int', 'value': 500},
-                {'name': 'Refresh Rate', 'type': 'float', 'value': 2e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Plotted Samples', 'type': 'int', 'value': 500},
+                {'name': 'Plotter Refresh Rate', 'type': 'float', 'value': 2e1, 'siPrefix': True, 'suffix': 'Hz'},
             ]},
         ]
+
 
         # MORE PARAMS TO BE IMPLEMENTED
         # - output video file path
@@ -485,24 +495,38 @@ class ParameterTreeWidget(QtCore.QObject):
         self.p = Parameter.create(
             name='params', type='group', children=defaultParams)
 
+
+        """
+        def flatten(param):
+            items = []
+            for ch in param.children():
+                items.extend(flatten(ch).items())
+
+            items.extend({param.name() : param.value()}.items())
+            return dict(items)
+        """
+
+
         self.t = parameterView  # use the ID of the promoted graphicsView
         self.t.setParameters(self.p, showTop=False)
         self.t.show()
 
     # recursively go through the tree and search for a parameter with <key>
-    # returns None if no fitting value was found
-    def getConfigValue(self, key, tree=None):
+    # returns None if no value was found
+    def getValue(self, key, tree=None):
         if tree is None:
             tree = self.p
 
         for ch in tree.children():
-            if ch.name() == key:
+            if ch.name() == key or ch.name().replace(" ", "") == key:
                 return ch.value()
             else:
-                cv = self.getConfigValue(key, ch)
+                cv = self.getValue(key, ch)
                 if cv is not None:
                     return cv
 
+        if tree is self.p:
+            print "Warning: Requested config value \"" + key + "\" not found. Returning None!"
         return None
 
     def save(self):
@@ -624,7 +648,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
         self.saveShortcutsOnExit = True
 
     def configure(self, config):
-        self.simultaneousLabels = config.getConfigValue('Allow multiple labels at once')
+        self.saveKeyMapping = config.getValue('SaveAnnotatorKeyMapping')
 
     # loads the annotation config from a binary file
     def loadConfig(self, path):
@@ -633,7 +657,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
             self.annotatorConfig = pickle.load(f)
             print "Existing shortcuts loaded:"
             for a in self.annotatorConfig.itervalues():
-                print a
+                print "\t" + str(a)
         except Exception:
             print "Error loading shortcut file"
 
@@ -817,12 +841,11 @@ class Annotator(QtCore.QObject):
         self.outFilePath = 'annotationOut.txt'
 
     def configure(self, config):
-        self.sampleRate = config.getConfigValue('Sample Rate')
-        self.allowMultiLabel = config.getConfigValue('Allow Multiple Labels')
-        self.outFilePath = config.getConfigValue('Data Output Filename')
-        self.saveKeyMaps = config.getConfigValue('Save Key Maps')
-        self.keyMapPath = config.getConfigValue('Key Map Save File')
-        self.output = config.getConfigValue('Data Output Target')
+        self.allowMultiLabel = config.getValue('ConcurrentLabels')
+        self.sampleRate = config.getValue('DataSampleRate')
+        self.saveKeyMaps = config.getValue('SaveAnnotatorKeyMapping')
+        self.output = config.getValue('AnnotatorDataOutputTarget')
+        self.outFilePath = config.getValue('DataOutputFilename')
 
     def quit(self):
         # write annotation data
