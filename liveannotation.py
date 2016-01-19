@@ -4,6 +4,7 @@ import sys
 import pickle
 import inspect
 import time
+import select
 from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtCore import pyqtSlot, pyqtSignal
 from pyqtgraph.parametertree import Parameter
@@ -15,17 +16,20 @@ from gi.repository import Gst, GObject, GstVideo, GdkX11
 GObject.threads_init()
 Gst.init(None)
 
+
 import numpy as np
 
-import dataparser as dp
+#import dataparser as dp
 
 
 ### TODOS ###
 # - fix performance issue (fixed?)
 # - enable configuration (WIP)
 # - stream video over network
+# - certain combinations of play / pause / record lead to hangups
 # - add status string under video / plotter (determine what is needed / useful)
 # - "null pointer passed" error at shutdown (gone? now "thread destroyed while still running")
+# - still not all config values are used
 
 
 # Application GUI
@@ -47,6 +51,10 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         self.plotter = GraphicsLayoutWidget(self.graphicsLayoutView)
         self.annotatorConfig = AnnotationConfigWidget(self.frameKeys)
         self.annotator = Annotator()
+        self.dpThread = QtCore.QThread()
+        self.dp = DataParser()
+        self.dp.moveToThread(self.dpThread)
+        self.dpThread.start()
 
         # connect elements
         # self.annotator.newLabelSignal.connect(self.plotter.onNewClassLabel)
@@ -55,9 +63,9 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         self.annotatorConfig.keyPressSignal.connect(
             self.plotter.onShortcutEnable)
 
-        dp.obj.start(1000 / 50)
-        dp.obj.connect(self.plotter.dataSlot)
-        dp.obj.connect(self.annotator.dataSlot)
+        self.dp.start(1000 / 50)
+        self.dp.connect(self.plotter.dataSlot)
+        self.dp.connect(self.annotator.dataSlot)
 
         # set all config values
         self.connect(self.tabWidget, QtCore.SIGNAL(
@@ -73,7 +81,7 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         self.annotatorConfig.keyReleaseEvent(e)
 
     def closeEvent(self, event):
-        dp.obj.stop()
+        self.dp.stop()
         self.annotatorConfig.quit()
         self.plotter.quit()
         self.annotator.quit()
@@ -89,10 +97,78 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
         self.annotatorConfig.configure(self.config)
         self.stream.configure(self.config)
         self.annotator.configure(self.config)
-        dp.obj.stop()
-        dp.obj.start(1000 / self.config.getValue("Data Sample Rate"))
-        dp.obj.connect(self.plotter.dataSlot)
-        dp.obj.connect(self.annotator.dataSlot)
+        self.dp.stop()
+        self.dp.start(1000 / self.config.getValue("Data Sample Rate"))
+        self.dp.connect(self.plotter.dataSlot)
+        self.dp.connect(self.annotator.dataSlot)
+
+
+class DataParser(QtCore.QObject):
+    newData = QtCore.pyqtSignal(tuple)
+
+    def __init__(self):
+        super(DataParser, self).__init__()
+        self.source = None
+        self.fromFile = False
+        self.lastProcTime = None
+        self.period = 0
+        self.deltaTimes = [0 for i in range(0,50)]
+        self.meanDeltaTime = 0
+
+        if len(sys.argv) > 1:
+            print 'Reading sensor data from file.'
+            self.source = open(sys.argv[1], 'r')
+            self.fromFile = True
+        else:
+            self.source = sys.stdin
+        self.timer = None
+
+
+    ## Creates a QTimer that polls the source for data
+    def start(self, locPeriod):
+        self.period = locPeriod
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.processData)
+        self.timer.start(self.period)
+
+
+    ## Stop polling for data
+    def stop(self):
+        self.timer = []
+
+
+    # get all available data from the source and emit signals
+    def processData(self):
+        # get data
+        while self.fromFile or select.select([sys.stdin], [], [], 0)[0]:
+            if self.lastProcTime is not None:
+              newDeltaTime = time.time() - self.lastProcTime
+              self.deltaTimes.append(newDeltaTime)
+              del self.deltaTimes[0]
+              self.meanDeltaTime = sum(self.deltaTimes) / len(self.deltaTimes)
+
+            self.lastProcTime = time.time()
+
+            line = self.source.readline()
+            if line:
+                # read space separated data fields
+                fields = line.split('\t')
+                print fields
+                nums = [float(i) for i in fields[1:-2]]
+                data = (fields[0], nums)
+
+                # emit signal
+                self.newData.emit(data)
+
+            else:
+                print "Warning: No sample collected in this time frame. Getting out of sync."
+
+            break
+
+
+    ## Connect function to signal
+    def connect(self, callback):
+        self.newData.connect(callback)
 
 
 # Plottable label container
@@ -167,8 +243,8 @@ class GraphicsLayoutWidget:
         del self.meanHorizonSize[0]
         self.lastTime = thisTime
         meanDeltaTime = sum(self.meanHorizonSize) / len(self.meanHorizonSize)
-        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: {:.2f} ms, Number of Data Points: {}".format(
-            meanDeltaTime * 1000, 1 / meanDeltaTime, dp.obj.meanDeltaTime * 1000, self.data.shape[1]))
+        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: ? ms, Number of Data Points: {}".format(
+            meanDeltaTime * 1000, 1 / meanDeltaTime, self.data.shape[1]))
 
     def configure(self, config):
         self.xLimit = config.getValue('PlottedSamples')
