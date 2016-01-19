@@ -153,7 +153,6 @@ class DataParser(QtCore.QObject):
             if line:
                 # read space separated data fields
                 fields = line.split('\t')
-                print fields
                 nums = [float(i) for i in fields[1:-2]]
                 data = (fields[0], nums)
 
