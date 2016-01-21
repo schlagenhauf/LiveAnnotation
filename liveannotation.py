@@ -115,6 +115,8 @@ class DataParser(QtCore.QObject):
         self.deltaTimes = [0 for i in range(0,50)]
         self.meanDeltaTime = 0
 
+        self.noSample = False
+
         if len(sys.argv) > 1:
             print 'Reading sensor data from file.'
             self.source = open(sys.argv[1], 'r')
@@ -158,9 +160,12 @@ class DataParser(QtCore.QObject):
 
                 # emit signal
                 self.newData.emit(data)
+                self.noSample = False
 
             else:
-                print "Warning: No sample collected in this time frame. Getting out of sync."
+                if not self.noSample:
+                    print "Warning: No sample collected in this time frame. Getting out of sync."
+                self.noSample = True
 
             break
 
@@ -205,17 +210,15 @@ class GraphicsLayoutWidget:
 
         # config
         self.xLimit = 300
-        self.rate = 50
+        self.rate = 20
 
         self.lastTime = time.time()
         self.meanHorizonSize = [0 for i in range(0, 50)]
 
-        self.skipCounter = 0
-
         # set timer for update
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update)
-        self.timer.start(1000 / 20)
+        self.timer.start(1000 / self.rate)
 
     def update(self):
         numSamples = self.data.shape[1]
@@ -242,8 +245,17 @@ class GraphicsLayoutWidget:
         del self.meanHorizonSize[0]
         self.lastTime = thisTime
         meanDeltaTime = sum(self.meanHorizonSize) / len(self.meanHorizonSize)
-        self.statusLabel.setText("Cycle Time: {:.2f} ms / {:.2f} Hz, DataParser Period: ? ms, Number of Data Points: {}".format(
-            meanDeltaTime * 1000, 1 / meanDeltaTime, self.data.shape[1]))
+
+        # set text
+        text = "{} data points ({} shown)".format(self.data.shape[1], self.xLimit)
+        if self.data.shape[1] == 0:
+            text += ", Update Rate: - ms / - Hz"
+        else:
+            text += ", Update Rate: {:.2f} ms / {:.2f} Hz".format(
+                meanDeltaTime * 1000, 1 / meanDeltaTime)
+        text += ", {} labels".format(len(self.annotations))
+
+        self.statusLabel.setText(text)
 
     def configure(self, config):
         self.xLimit = config.getValue('PlottedSamples')
@@ -404,7 +416,7 @@ class VideoWrapper:
     def getStateStr(self):
         state = "Running, " if self.isRunning else "Halted, "
         state += "Ready, " if self.isReady else "Not Ready, "
-        state += "Recording, " if self.isRecording else "Not Recording, "
+        state += "Recording " if self.isRecording else "Not Recording "
         return state
 
     def setSource(self, source):
