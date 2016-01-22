@@ -38,10 +38,12 @@ main_form = uic.loadUiType("la.ui")[0]
 dialog_form = uic.loadUiType("ad.ui")[0]
 
 
-# Top level class for main window and module instances
 class LiveAnnotation(QtGui.QMainWindow, main_form):
+    """Top level class for main window and component instances."""
 
     def __init__(self, args, parent=None):
+        """Constructor. Instanciation of all components, component setup and main window button connection happens here."""
+
         QtGui.QMainWindow.__init__(self, parent)
         self.setupUi(self)
 
@@ -72,15 +74,16 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
             'currentChanged(int)'), self.updateConfigurables)
         self.updateConfigurables()
 
-    # hand key presses to the annotationConfig widget
     def keyPressEvent(self, e):
+        """Pass key presses to the annotationConfig widget."""
         self.annotatorConfig.keyPressEvent(e)
 
-    # hand key releases to the annotationConfig widget
     def keyReleaseEvent(self, e):
+        """Pass key releases to the annotationConfig widget."""
         self.annotatorConfig.keyReleaseEvent(e)
 
     def closeEvent(self, event):
+        """When the window is closed, stop reading the data input and close all components gracefully."""
         self.dp.stop()
         self.annotatorConfig.quit()
         self.plotter.quit()
@@ -88,9 +91,8 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
 
         event.accept()
 
-    # Sets all config values again (e.g. after changing the config)
-    # only use getValue here, to ensure that all values are updated
     def updateConfigurables(self):
+        """Sets all config values again (e.g. after changing the config)."""
         print 'Reconfiguring all modules'
         self.stream.configure(self.config)
         self.plotter.configure(self.config)
@@ -104,9 +106,15 @@ class LiveAnnotation(QtGui.QMainWindow, main_form):
 
 
 class DataParser(QtCore.QObject):
+    """Class for reading stdin and parsing the stream.
+
+    Creates its own timer. Provides "newData" signal.
+    """
+
     newData = QtCore.pyqtSignal(tuple)
 
     def __init__(self):
+        """Constructor. Setup time measurement and QTimer."""
         super(DataParser, self).__init__()
         self.source = None
         self.fromFile = False
@@ -126,21 +134,21 @@ class DataParser(QtCore.QObject):
         self.timer = None
 
 
-    ## Creates a QTimer that polls the source for data
     def start(self, locPeriod):
+        """Creates a QTimer that polls the source for data."""
         self.period = locPeriod
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.processData)
         self.timer.start(self.period)
 
 
-    ## Stop polling for data
     def stop(self):
+        """Stop polling for data."""
         self.timer = []
 
 
-    # get all available data from the source and emit signals
     def processData(self):
+        """Get all available data from the source and emit signals."""
         # get data
         while self.fromFile or select.select([sys.stdin], [], [], 0)[0]:
             if self.lastProcTime is not None:
@@ -170,34 +178,39 @@ class DataParser(QtCore.QObject):
             break
 
 
-    ## Connect function to signal
     def connect(self, callback):
+        """Connect function to signal."""
         self.newData.connect(callback)
 
 
-# Plottable label container
 class Label:
+    """Container class for labels."""
 
     def __init__(self, name='other', startIdx=0, endIdx=-1):
+        """Convenience constructor."""
         self.name = name
         self.startIdx = startIdx
         self.endIdx = endIdx
 
     def __str__(self):
+        """toString method for debugging."""
         return str((self.name, self.startIdx, self.endIdx))
 
 
 class PlotLabel(Label):
+    """Derived container class for plottable labels."""
 
     def __init__(self, name='other', startIdx=0, endIdx=-1):
+        """Convenience constructor."""
         Label.__init__(self, name, startIdx, endIdx)
         self.linReg = []
 
 
-# Widget managing plotting
 class GraphicsLayoutWidget:
+    """Plotting widget. Creates a plot window with a dynamic number of plots, depending on the input data."""
 
     def __init__(self, widget):  # create plot window self.w = widget
+        """Constructor."""
         self.plots = []
         self.w = widget
 
@@ -221,6 +234,7 @@ class GraphicsLayoutWidget:
         self.timer.start(1000 / self.rate)
 
     def update(self):
+        """Updates plot data, number of plots and labels (i.e. everything)."""
         numSamples = self.data.shape[1]
 
         # delete labels that are not visible anymore
@@ -236,28 +250,11 @@ class GraphicsLayoutWidget:
 
         self.__updateClassLabels()
 
-        # app.processEvents()  # force complete redraw for every plot
+        self.__setStatusLabel()
 
-        # calculate delta t
-        thisTime = time.time()
-        newDeltaTime = thisTime - self.lastTime
-        self.meanHorizonSize.append(newDeltaTime)
-        del self.meanHorizonSize[0]
-        self.lastTime = thisTime
-        meanDeltaTime = sum(self.meanHorizonSize) / len(self.meanHorizonSize)
-
-        # set text
-        text = "{} data points ({} shown)".format(self.data.shape[1], self.xLimit)
-        if self.data.shape[1] == 0:
-            text += ", Update Rate: - ms / - Hz"
-        else:
-            text += ", Update Rate: {:.2f} ms / {:.2f} Hz".format(
-                meanDeltaTime * 1000, 1 / meanDeltaTime)
-        text += ", {} labels".format(len(self.annotations))
-
-        self.statusLabel.setText(text)
 
     def configure(self, config):
+        """Read plotting configuration from config class."""
         self.xLimit = config.getValue('PlottedSamples')
         self.rate = config.getValue('PlotterRefreshRate')
         self.timer = QtCore.QTimer()
@@ -265,11 +262,12 @@ class GraphicsLayoutWidget:
         self.timer.start(1000 / self.rate)
 
     def quit(self):
+        """Remove all plots from the plot window before quitting."""
         for p in self.plots:
             self.w.removeItem(p)
 
-    # creates new linearRegion objects if necessary and deletes outdated ones
     def __updateClassLabels(self):
+        """Creates a rectangle in each plot for every new label."""
         for cl in self.annotations:
             if not cl.linReg:
                 for pl in self.plots:
@@ -295,17 +293,37 @@ class GraphicsLayoutWidget:
         self.__setStatusLabel()
 
     def __setStatusLabel(self):
+        """Prints display rate, number of samples and number of visible samples in the status bar of the plot window."""
         numSamples = self.data.shape[1]
         visibleSamples = self.xLimit if numSamples > self.xLimit else numSamples
-        #self.statusLabel.setText('Samples: ' + str(numSamples) + ' [' + str(visibleSamples) + ' visible]')
+
+        # calculate delta t
+        thisTime = time.time()
+        newDeltaTime = thisTime - self.lastTime
+        self.meanHorizonSize.append(newDeltaTime)
+        del self.meanHorizonSize[0]
+        self.lastTime = thisTime
+        meanDeltaTime = sum(self.meanHorizonSize) / len(self.meanHorizonSize)
+
+        # set text
+        text = "{} data points ({} shown)".format(numSamples, visibleSamples)
+        if self.data.shape[1] == 0:
+            text += ", Update Rate: - ms / - Hz"
+        else:
+            text += ", Update Rate: {:.2f} ms / {:.2f} Hz".format(
+                meanDeltaTime * 1000, 1 / meanDeltaTime)
+        text += ", {} labels".format(len(self.annotations))
+
+        self.statusLabel.setText(text)
 
     def setYLabels(self, labels):
+        """Sets the y-axis-labels for each plot. Currently there is no actual source for the label names."""
         self.labels = labels
         self.__updateYLabels()
 
-    # slot for appending new data
     @pyqtSlot(tuple)
     def dataSlot(self, data):
+        """Slot for appending new data."""
         ndata = np.array(data[1], ndmin=2).T
 
         # check if length of data vector has changed, and pad with zeros if
@@ -320,9 +338,9 @@ class GraphicsLayoutWidget:
         # append
         self.data = np.hstack((self.data, ndata))
 
-    # slot for reacting to newly annotated labels
     @pyqtSlot(tuple)
     def onShortcutEnable(self, data):
+        """Slot for reacting to newly annotated labels."""
         numSamples = self.data.shape[1]
 
         # trigger corresponding label
@@ -346,6 +364,9 @@ class GraphicsLayoutWidget:
                 print "Error: ending label failed, no corresponding start"
 
     def __updateNumberOfPlots(self):
+        """Check height of data matrix and add plots if necessary.
+
+        This can only change if the input stream adds new columns on the fly (unlikely)."""
         numDims = self.data.shape[0]
         while len(self.plots) < numDims:
             self.plots.append(self.w.addPlot())
@@ -354,10 +375,11 @@ class GraphicsLayoutWidget:
             self.w.nextRow()
 
 
-# GStreamer video secording and display Wrapper
 class VideoWrapper:
+    """GStreamer video secording and display wrapper."""
 
     def __init__(self, targetWin):
+        """Constructor."""
         self.pl = None
         self.isRunning = False
         self.isRecording = False
@@ -369,11 +391,10 @@ class VideoWrapper:
         self.fileOutPath = ""
         self.source = "videotestsrc"
 
-    # If not already running / ready / not recording, create a new pipeline
-    # and start it
     def play(self):
-        #if self.isRunning or not self.isReady or self.isRecording:
-        if self.isRunning or not self.isReady:
+        """If not already running / ready / not recording, create a new pipeline and start it."""
+        #if self.isRunning or not self.isReady:
+        if self.isRunning or not self.isReady or self.isRecording:
             return
 
         self.isRunning = True
@@ -381,9 +402,8 @@ class VideoWrapper:
         self.pl.set_state(Gst.State.PLAYING)
         print "Start playing"
 
-    #
-    # If currently running, stop the pipeline and set to not ready
     def stop(self):
+        """If currently running, stop the pipeline and set to not ready."""
         if self.isRunning:
             self.isRunning = False
             self.isReady = False
@@ -391,9 +411,8 @@ class VideoWrapper:
             self.pl.send_event(Gst.Event.new_eos())
         print "Stop playing"
 
-    # Turns the recording on or off, depending on the previous state. Only
-    # allowed when running
     def toggleRec(self):
+        """Turns the recording on or off, depending on the previous state. Only allowed when running."""
         print "Toggle Recording, is now: " + str("on" if not self.isRecording else "off")
         #if not self.isRunning or not self.isReady:
         if not self.isReady:
@@ -414,24 +433,28 @@ class VideoWrapper:
 
 
     def getStateStr(self):
+        """Returns a string describing the current state of the pipeline."""
         state = "Running, " if self.isRunning else "Halted, "
         state += "Ready, " if self.isReady else "Not Ready, "
         state += "Recording " if self.isRecording else "Not Recording "
         return state
 
     def setSource(self, source):
+        """Setter for video source."""
         self.source = source
         #self.__updatePipeline()
 
     def setIP(self, ip):
+        """Setter for IP address."""
         self.ip = ip
 
     def setFramerate(self, framerate):
+        """Set framerate of the stream."""
         self.framerate = framerate
 
-    # Creates / updates the GStreamer pipeline according to the currently set
-    # state
     def __updatePipeline(self):
+        """Creates / updates the GStreamer pipeline according to the currently set state."""
+
         print "Updating Pipeline, isReady: {}, isRunning: {}, isRecording: {} ".format(self.isReady, self.isRunning, self.isRecording)
         if self.pl:
             self.pl.set_state(Gst.State.NULL)
@@ -463,8 +486,8 @@ class VideoWrapper:
 
         print "\tWinID: " + str(self.targetWin.winId())
 
-    # GStreamer Callback for end of stream messages
     def __onEos(self, bus, message):
+        """GStreamer Callback for end of stream messages."""
         print "Received EOS"
         self.pl.set_state(Gst.State.NULL)
 
@@ -479,8 +502,8 @@ class VideoWrapper:
 
         self.isReady = True
 
-    # GStreamer Callback for error messages
     def __onError(self, bus, message):
+        """GStreamer Callback for error messages."""
         err, debug = message.parse_error()
         print "Error: %s" % err, debug
         self.pl.set_state(Gst.State.NULL)
@@ -488,19 +511,19 @@ class VideoWrapper:
         self.isRecording = False
         self.isReady = True
 
-    # GStreamer Callback for sync messages, sent when autovideosink wants to
-    # draw to an x window
     def __onSyncMessage(self, bus, message):
+        """GStreamer Callback for sync messages, sent when autovideosink wants to draw to an x window."""
         if message.get_structure().get_name() == "prepare-window-handle":
             imagesink = message.src
             imagesink.set_property("force-aspect-ratio", True)
             imagesink.set_window_handle(self.targetWin.winId())
 
 
-# Widget managing video stream
 class VideoWidget:
+    """Widget managing video stream."""
 
     def __init__(self, widget):
+        """Constructor."""
         self.widget = widget
         self.widget.parent().findChild(QtGui.QPushButton,
                                        "btnRec").clicked.connect(self.__onRec)
@@ -513,38 +536,39 @@ class VideoWidget:
 
         self.wrapper = VideoWrapper(self.widget)
 
-    # Play button callback
     def __onPlay(self):
+        """Play button callback."""
         self.wrapper.play()
         self.__updateStatusLabel()
 
-    # Pause button callback
     def __onPause(self):
+        """Pause button callback."""
         self.wrapper.stop()
         self.__updateStatusLabel()
 
-    # Record button callback
     def __onRec(self):
+        """Record button callback."""
         self.wrapper.toggleRec()
         self.__updateStatusLabel()
 
-    # Configurable member
     def configure(self, config):
+        """Configurable member."""
         self.fileOutPath = config.getValue('VideoOutputFile')
         self.filePolicy = config.getValue('VideoOutputFilePolicy')
         self.wrapper.setSource(config.getValue('GStreamerVideoSource'))
         self.wrapper.setIP(config.getValue('NetworkSourceIP'))
         self.wrapper.setFramerate(config.getValue('VideoFrameRate'))
 
-    # Sets the status label text with the current module status
     def __updateStatusLabel(self):
+        """Sets the status label text with the current module status."""
         self.statusLabel.setText(self.wrapper.getStateStr())
 
 
-# Widget populating and reading configuration
 class ParameterTreeWidget(QtCore.QObject):
+    """Widget populating and reading configuration."""
 
     def __init__(self, parameterView):
+        """Constructor. Defines all default parameters."""
         super(ParameterTreeWidget, self).__init__()
         defaultParams = [
             {'name': 'General', 'type': 'group', 'children': [
@@ -598,9 +622,8 @@ class ParameterTreeWidget(QtCore.QObject):
         self.t.setParameters(self.p, showTop=False)
         self.t.show()
 
-    # recursively go through the tree and search for a parameter with <key>
-    # returns None if no value was found
     def getValue(self, key, tree=None):
+        """Recursively go through the tree and search for a parameter with <key>. Returns None if no value was found."""
         if tree is None:
             tree = self.p
 
@@ -616,21 +639,12 @@ class ParameterTreeWidget(QtCore.QObject):
             print "Warning: Requested config value \"" + key + "\" not found. Returning None!"
         return None
 
-    def save(self):
-        self.state = self.p.saveState()
 
-    def restore(self):
-        add = self.p['Save/Restore functionality',
-                     'Restore State', 'Add missing items']
-        rem = self.p['Save/Restore functionality',
-                     'Restore State', 'Remove extra items']
-        self.p.restoreState(self.state, addChildren=add, removeChildren=rem)
-
-
-# Subwindow to add / modify a new label type
 class AddEntryDialog(QtGui.QDialog, dialog_form):
+    """Subwindow to add / modify a new label type."""
 
     def __init__(self, args, parent):
+        """Constructor. Creates QtDialog."""
         QtGui.QDialog.__init__(self, parent)
         self.setupUi(self)
         self.parent = parent
@@ -643,16 +657,16 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
         self.buttonBox.rejected.connect(self.onReject)
         #self.connect(buttonBox, QtCore.SIGNAL("accepted()"), self.onAccept, QtCore.SLOT("accept()"))
 
-    # Setter for filling in values when modifying
     def setValues(self, lm):
+        """Setter for filling in values when modifying."""
         self.editName.setText(lm.name)
         self.editKeyMap.setText(lm.key.toString())
         self.radioToggle.setChecked(lm.toggleMode)
         self.radioHold.setChecked(not lm.toggleMode)
         self.editDescription.setText(lm.description)
 
-    # Records a modifier + key shortcut
     def onRecKey(self):
+        """Record button callback. Records a modifier + key shortcut."""
         # prompt the user to enter a shortcut
         self.editKeyMap.setText("Press key...")
 
@@ -660,6 +674,7 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
         self.listenForKeyPress = True
 
     def keyPressEvent(self, e):
+        """Key press callback for key recording."""
         if self.listenForKeyPress and e.key() not in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Alt, QtCore.Qt.Key_Shift):
             modifiers = QtGui.QApplication.keyboardModifiers()
             keyMods = ''
@@ -676,8 +691,8 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
 
             self.listenForKeyPress = False
 
-    # reads out the forms and returns LabelMeta instance
     def onAccept(self):
+        """Reads out the forms and returns LabelMeta instance."""
         if not str(self.editName.text()).isalnum():
             errdiag = QtGui.QErrorMessage()
             errdiag.showMessage("Invalid label name. Only alphanumerical characters are allowed.")
@@ -687,15 +702,16 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
             )), str(self.editDescription.toPlainText()), self.radioToggle.isChecked())
             self.accept()
 
-    # just close the window
     def onReject(self):
+        """Just close the window."""
         self.close()
 
 
-# Container for label information
 class LabelMeta:
+    """Container for label meta information."""
 
     def __init__(self, name="", key=None, description="", toggleMode=True):
+        """Constructor."""
         self.name = name
         self.key = key
         self.description = description
@@ -703,16 +719,16 @@ class LabelMeta:
         self.state = False
 
     def __str__(self):
+        """toString method for debugging."""
         return "Name: " + self.name + ", Key: " + str(self.key.toString()) + ", Descr: " + self.description
 
 
-# Class managing the annotation configuration widget
 class AnnotationConfigWidget(QtGui.QWidget):
-    # class AnnotationConfigWidget:
+    """Class managing the annotation configuration widget. Defines "keyPressSignal" signal."""
     keyPressSignal = pyqtSignal(tuple)
 
-    # Constructor
     def __init__(self, widget):
+        """Constructor."""
         super(AnnotationConfigWidget, self).__init__()
         super(QtGui.QWidget, self).__init__()
 
@@ -735,10 +751,11 @@ class AnnotationConfigWidget(QtGui.QWidget):
         self.saveShortcutsOnExit = True
 
     def configure(self, config):
+        """Reads annotation widget config from config class."""
         self.saveKeyMapping = config.getValue('SaveAnnotatorKeyMapping')
 
-    # loads the annotation config from a binary file
     def loadConfig(self, path):
+        """Loads the annotation config from a binary file."""
         try:
             f = open(path, "rb")
             self.annotatorConfig = pickle.load(f)
@@ -749,6 +766,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
             print "Error loading shortcut file"
 
     def saveConfig(self, path):
+        """Saves the created key map for labeling."""
         # serialize config
         f = open(path, "wb")
         pickle.dump(self.annotatorConfig, f, pickle.HIGHEST_PROTOCOL)
@@ -757,6 +775,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
             print a
 
     def quit(self):
+        """Saves the shortcuts / key map before quitting if configured as such."""
         if self.saveShortcutsOnExit:
             # turn all labels off
             for k, v in self.annotatorConfig.iteritems():
@@ -765,6 +784,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
             self.saveConfig("shortcuts.cfg")
 
     def keyPressEvent(self, e):
+        """Key press callback for data labeling."""
         if e.key() in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Alt, QtCore.Qt.Key_Shift):
             return  # filter out modifier events
 
@@ -793,6 +813,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
                     self.keyPressSignal.emit((a.name, a.state))  # send out new label state
 
     def keyReleaseEvent(self, e):
+        """Key release callback for data labeling when in Hold-mode."""
         if e.key() in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Alt, QtCore.Qt.Key_Shift):
             return  # filter out modifier events
 
@@ -813,6 +834,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
 
     @staticmethod
     def assembleKeySequence(key, mods):
+        """Helper method for assembling a KeySequence string from pressed keys."""
         keyMods = ''
         if mods & QtCore.Qt.ControlModifier:
             keyMods += 'Ctrl+'
@@ -824,9 +846,8 @@ class AnnotationConfigWidget(QtGui.QWidget):
         keySeq = QtGui.QKeySequence(keyMods + keySeq.toString())
         return keySeq
 
-    # Synchronizes the internal list with the displayed table and updates
-    # shotcuts
     def syncLists(self):
+        """Synchronizes the internal list with the displayed table and updates shotcuts."""
         # save sort column and order for sorting afterwards
         sortCol = self.tableWidget.horizontalHeader().sortIndicatorSection()
         sortOrd = self.tableWidget.horizontalHeader().sortIndicatorOrder()
@@ -850,7 +871,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
         self.tableWidget.sortItems(sortCol, sortOrd)
 
     def __onAddKey(self):
-        # open dialog window
+        """Open dialog window."""
         dialog = AddEntryDialog(args=[], parent=self.widget)
         dialog.setModal(True)
         if dialog.exec_():  # if dialog closes with accept()
@@ -864,7 +885,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
             self.syncLists()
 
     def __onDelKey(self):
-        # get currently selected item and delete it
+        """Get currently selected item and delete it."""
         row = self.tableWidget.currentRow()
 
         # check if there is an item selected
@@ -882,10 +903,8 @@ class AnnotationConfigWidget(QtGui.QWidget):
         del(self.annotatorConfig[label])
         self.syncLists()
 
-
-
     def __onModKey(self):
-        # get currently selected item and open the additem dialog
+        """Get currently selected item and open the additem dialog."""
         row = self.tableWidget.currentRow()
 
         # check if there is an item selected
@@ -906,6 +925,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
             self.syncLists()
 
     def __updateTableWidget(self):
+        """Synchronize internal and displayed list."""
         self.tableWidget.clearContents()
         self.tableWidget.setRowCount(len(self.keys))
 
@@ -916,18 +936,20 @@ class AnnotationConfigWidget(QtGui.QWidget):
 # Application Logic
 
 
-# A tool for annotating a stream of sensor data with labels
 class Annotator(QtCore.QObject):
+    """A tool for annotating a stream of sensor data with labels."""
+
     newLabelSignal = pyqtSignal(tuple)
 
-    # Constructor
     def __init__(self):
+        """Constructor."""
         super(Annotator, self).__init__()
         self.annotations = []  # list of touples containing label, index, and start/stop flag
         self.data = np.zeros((0, 0))
         self.outFilePath = 'annotationOut.txt'
 
     def configure(self, config):
+        """Read annotation parameters from config class."""
         self.allowMultiLabel = config.getValue('ConcurrentLabels')
         self.sampleRate = config.getValue('DataSampleRate')
         self.saveKeyMaps = config.getValue('SaveAnnotatorKeyMapping')
@@ -935,12 +957,12 @@ class Annotator(QtCore.QObject):
         self.outFilePath = config.getValue('DataOutputFilename')
 
     def quit(self):
-        # write annotation data
+        """Write annotation data to file before quitting."""
         self.writeAnnotatedData()
 
-    # Slot for receiving data
     @pyqtSlot(tuple)
     def dataSlot(self, data):
+        """Slot for receiving data."""
         ndata = np.array(data[1], ndmin=2).T
 
         # check if length of data vector has changed, and pad with zeros if
@@ -955,9 +977,9 @@ class Annotator(QtCore.QObject):
         # append
         self.data = np.hstack((self.data, ndata))
 
-    # Slot for key presses
     @pyqtSlot(tuple)  # tuple = (name, on / off)
     def onShortcutEnable(self, data):
+        """Slot for key presses."""
         numSamples = self.data.shape[1]
 
 
@@ -983,6 +1005,7 @@ class Annotator(QtCore.QObject):
                 print "Annotator Error: ending label failed, no corresponding start"
 
     def writeAnnotatedData(self):
+        """Write annotated data to file."""
         if not self.annotations:
             return
 
@@ -1007,6 +1030,7 @@ class Annotator(QtCore.QObject):
 
 
 if __name__ == '__main__':
+    """Main function."""
     app = QtGui.QApplication(sys.argv)
     l = LiveAnnotation(sys.argv)
     l.show()
