@@ -120,7 +120,7 @@ class DataParser(QtCore.QObject):
         self.fromFile = False
         self.lastProcTime = None
         self.period = 0
-        self.deltaTimes = [0 for i in range(0,50)]
+        self.deltaTimes = [0 for i in range(0, 50)]
         self.meanDeltaTime = 0
 
         self.noSample = False
@@ -133,7 +133,6 @@ class DataParser(QtCore.QObject):
             self.source = sys.stdin
         self.timer = None
 
-
     def start(self, locPeriod):
         """Creates a QTimer that polls the source for data."""
         self.period = locPeriod
@@ -141,21 +140,20 @@ class DataParser(QtCore.QObject):
         self.timer.timeout.connect(self.processData)
         self.timer.start(self.period)
 
-
     def stop(self):
         """Stop polling for data."""
         self.timer = []
-
 
     def processData(self):
         """Get all available data from the source and emit signals."""
         # get data
         while self.fromFile or select.select([sys.stdin], [], [], 0)[0]:
             if self.lastProcTime is not None:
-              newDeltaTime = time.time() - self.lastProcTime
-              self.deltaTimes.append(newDeltaTime)
-              del self.deltaTimes[0]
-              self.meanDeltaTime = sum(self.deltaTimes) / len(self.deltaTimes)
+                newDeltaTime = time.time() - self.lastProcTime
+                self.deltaTimes.append(newDeltaTime)
+                del self.deltaTimes[0]
+                self.meanDeltaTime = sum(
+                    self.deltaTimes) / len(self.deltaTimes)
 
             self.lastProcTime = time.time()
 
@@ -176,7 +174,6 @@ class DataParser(QtCore.QObject):
                 self.noSample = True
 
             break
-
 
     def connect(self, callback):
         """Connect function to signal."""
@@ -251,7 +248,6 @@ class GraphicsLayoutWidget:
         self.__updateClassLabels()
 
         self.__setStatusLabel()
-
 
     def configure(self, config):
         """Read plotting configuration from config class."""
@@ -387,13 +383,13 @@ class VideoWrapper:
 
         self.targetWin = targetWin
         #self.winId = self.targetWin.winId()
-        #print winId
+        # print winId
         self.fileOutPath = ""
         self.source = "videotestsrc"
 
     def play(self):
         """If not already running / ready / not recording, create a new pipeline and start it."""
-        #if self.isRunning or not self.isReady:
+        # if self.isRunning or not self.isReady:
         if self.isRunning or not self.isReady or self.isRecording:
             return
 
@@ -414,7 +410,7 @@ class VideoWrapper:
     def toggleRec(self):
         """Turns the recording on or off, depending on the previous state. Only allowed when running."""
         print "Toggle Recording, is now: " + str("on" if not self.isRecording else "off")
-        #if not self.isRunning or not self.isReady:
+        # if not self.isRunning or not self.isReady:
         if not self.isReady:
             return
 
@@ -431,7 +427,6 @@ class VideoWrapper:
                 self.isReady = True
                 print "\tStopped recording, but stream was not playing anyway"
 
-
     def getStateStr(self):
         """Returns a string describing the current state of the pipeline."""
         state = "Running, " if self.isRunning else "Halted, "
@@ -442,7 +437,7 @@ class VideoWrapper:
     def setSource(self, source):
         """Setter for video source."""
         self.source = source
-        #self.__updatePipeline()
+        # self.__updatePipeline()
 
     def setIP(self, ip):
         """Setter for IP address."""
@@ -462,8 +457,8 @@ class VideoWrapper:
 
         pipeString = ""
         if self.isRecording:
-        #    pipeString = self.source + \
-        #        " ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink"
+            #    pipeString = self.source + \
+            #        " ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink"
             pipeString = "videotestsrc ! tee name=t t. ! queue ! videoconvert ! x264enc ! mp4mux ! filesink location=outvid01 async=0 t. ! queue ! autovideosink"
         else:
             pipeString = self.source + " ! autovideosink"
@@ -493,10 +488,10 @@ class VideoWrapper:
 
         # if we got here by stopping the recording, update the pipeline and
         # start again
-        #if self.isRunning:
+        # if self.isRunning:
         #    self.__updatePipeline()
         #    self.play()
-        #else:
+        # else:
         #    self.pl = None
         self.pl = None
 
@@ -572,31 +567,39 @@ class ParameterTreeWidget(QtCore.QObject):
         super(ParameterTreeWidget, self).__init__()
         defaultParams = [
             {'name': 'General', 'type': 'group', 'children': [
-                {'name': 'General Config File Path', 'type': 'str', 'value': "config.cfg"},
+                {'name': 'General Config File Path',
+                    'type': 'str', 'value': "config.cfg"},
             ]},
             {'name': 'Video', 'type': 'group', 'children': [
                 {'name': 'GStreamer Video Source', 'type': 'list', 'values': {"Test Source": "videotestsrc", "Webcam": "v4l2src", "network": "udp"}, 'value': "videotestsrc", 'children': [
-                    {'name': 'Network Source IP', 'type': 'str', 'value': "127.0.0.1"},
+                    {'name': 'Network Source IP',
+                        'type': 'str', 'value': "127.0.0.1"},
                 ]},
-                {'name': 'Video Frame Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Video Frame Rate', 'type': 'float',
+                    'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
                 {'name': 'Video Output File', 'type': 'str', 'value': "outvideo.mp4"},
-                {'name': 'Video Output File Policy', 'type': 'list', 'values' : {"Overwrite" : "overwrite", "Append" : "append", "Enumerate" : "enumerate"}, 'value' : "overwrite"},
+                {'name': 'Video Output File Policy', 'type': 'list', 'values': {
+                    "Overwrite": "overwrite", "Append": "append", "Enumerate": "enumerate"}, 'value': "overwrite"},
             ]},
             {'name': 'Annotation', 'type': 'group', 'children': [
-                {'name': 'Data Sample Rate', 'type': 'float', 'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Data Sample Rate', 'type': 'float',
+                    'value': 5e1, 'siPrefix': True, 'suffix': 'Hz'},
                 {'name': 'Concurrent Labels', 'type': 'bool', 'value': False},
-                {'name': 'Save Annotator Key Mapping', 'type': 'bool', 'value': True},
-                {'name': 'Annotator Key Mapping Save File', 'type': 'str', 'value': "keymap.cfg"},
+                {'name': 'Save Annotator Key Mapping',
+                    'type': 'bool', 'value': True},
+                {'name': 'Annotator Key Mapping Save File',
+                    'type': 'str', 'value': "keymap.cfg"},
                 {'name': 'Annotator Data Output Target', 'type': 'list', 'values': {
                     "File": "file", "Standard Output": "stdout"}, 'value': "file"},
-                {'name': 'Data Output Filename', 'type': 'str', 'value': "annotated_data.txt"},
+                {'name': 'Data Output Filename', 'type': 'str',
+                    'value': "annotated_data.txt"},
             ]},
             {'name': 'Plotting', 'type': 'group', 'children': [
                 {'name': 'Plotted Samples', 'type': 'int', 'value': 500},
-                {'name': 'Plotter Refresh Rate', 'type': 'float', 'value': 2e1, 'siPrefix': True, 'suffix': 'Hz'},
+                {'name': 'Plotter Refresh Rate', 'type': 'float',
+                    'value': 2e1, 'siPrefix': True, 'suffix': 'Hz'},
             ]},
         ]
-
 
         # MORE PARAMS TO BE IMPLEMENTED
         # - output video file path
@@ -605,7 +608,6 @@ class ParameterTreeWidget(QtCore.QObject):
 
         self.p = Parameter.create(
             name='params', type='group', children=defaultParams)
-
 
         """
         def flatten(param):
@@ -616,7 +618,6 @@ class ParameterTreeWidget(QtCore.QObject):
             items.extend({param.name() : param.value()}.items())
             return dict(items)
         """
-
 
         self.t = parameterView  # use the ID of the promoted graphicsView
         self.t.setParameters(self.p, showTop=False)
@@ -695,7 +696,8 @@ class AddEntryDialog(QtGui.QDialog, dialog_form):
         """Reads out the forms and returns LabelMeta instance."""
         if not str(self.editName.text()).isalnum():
             errdiag = QtGui.QErrorMessage()
-            errdiag.showMessage("Invalid label name. Only alphanumerical characters are allowed.")
+            errdiag.showMessage(
+                "Invalid label name. Only alphanumerical characters are allowed.")
 
         else:
             self.lm = LabelMeta(str(self.editName.text()), QtGui.QKeySequence(self.editKeyMap.text(
@@ -800,7 +802,8 @@ class AnnotationConfigWidget(QtGui.QWidget):
             if a.key.toString() == keySeq.toString():
                 if a.toggleMode:
                     a.state = not a.state  # toggle mode, thus toggle
-                    self.keyPressSignal.emit((a.name, a.state))  # send out new label state
+                    # send out new label state
+                    self.keyPressSignal.emit((a.name, a.state))
                 else:
                     if not a.state:  # if previous state was "off"
                         # send out new label state
@@ -810,7 +813,8 @@ class AnnotationConfigWidget(QtGui.QWidget):
                 # if only one label at a time is allowed, stop all other labels
                 if a.state:
                     a.state = False
-                    self.keyPressSignal.emit((a.name, a.state))  # send out new label state
+                    # send out new label state
+                    self.keyPressSignal.emit((a.name, a.state))
 
     def keyReleaseEvent(self, e):
         """Key release callback for data labeling when in Hold-mode."""
@@ -897,7 +901,9 @@ class AnnotationConfigWidget(QtGui.QWidget):
 
         # stop annotation if the label is currently active
         if self.annotatorConfig[label].state:
-            self.keyPressSignal.emit((label, not self.annotatorConfig[label].state))  # send out new label state
+            # send out new label state
+            self.keyPressSignal.emit(
+                (label, not self.annotatorConfig[label].state))
 
         # delete table widget item and dict item
         del(self.annotatorConfig[label])
@@ -981,7 +987,6 @@ class Annotator(QtCore.QObject):
     def onShortcutEnable(self, data):
         """Slot for key presses."""
         numSamples = self.data.shape[1]
-
 
         # trigger corresponding label
         if numSamples == 0:
