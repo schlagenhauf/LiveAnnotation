@@ -145,7 +145,9 @@ class DataParser(QtCore.QObject):
         self.timer = []
 
     def processData(self):
-        """Get all available data from the source and emit signals."""
+        """Get all available data from the source and emit signals.
+        Edit this method to support your data format parsing if necessary.
+        """
         # get data
         while self.fromFile or select.select([sys.stdin], [], [], 0)[0]:
             if self.lastProcTime is not None:
@@ -160,8 +162,10 @@ class DataParser(QtCore.QObject):
             line = self.source.readline()
             if line:
                 # read space separated data fields
-                fields = line.split('\t')
-                nums = [float(i) for i in fields[1:-2]]
+                #fields = line.split('\t')
+                fields = line.split(' ')
+                nums = [float(i) for i in fields[1:]]
+                #nums = [float(i) for i in fields[1:-2]]
                 data = (fields[0], nums)
 
                 # emit signal
@@ -215,6 +219,7 @@ class GraphicsLayoutWidget:
         self.annotations = []  # list of plotlabel containers
         # a matrix containing data for each dimension per row
         self.data = np.zeros((0, 0))
+        self.minMaxVals = np.zeros((1,2))
 
         self.statusLabel = self.w.parent().findChild(QtGui.QLabel, "labelPlotStatus")
 
@@ -242,8 +247,10 @@ class GraphicsLayoutWidget:
 
         for i, pl in enumerate(self.plots):
             pl.listDataItems()[0].setData(self.data[i, :])
+            pl.setYRange(self.minMaxVals[1,i], self.minMaxVals[0,i])
             if self.xLimit < numSamples:
                 pl.setXRange(numSamples - self.xLimit, numSamples)
+
 
         self.__updateClassLabels()
 
@@ -267,9 +274,9 @@ class GraphicsLayoutWidget:
         for cl in self.annotations:
             if not cl.linReg:
                 for pl in self.plots:
-                    #linReg = pg.LinearRegionItem([cl.startIdx, cl.endIdx])
                     linReg = QtGui.QGraphicsRectItem(
-                        cl.startIdx, -10, cl.endIdx - cl.startIdx, 20)
+                        cl.startIdx, 0, cl.endIdx - cl.startIdx, 1)
+                        #cl.startIdx, -500, cl.endIdx - cl.startIdx, 1000)
                     linReg.setPen(QtGui.QColor(255, 0, 0))
                     brush = QtGui.QBrush(QtCore.Qt.SolidPattern)
                     brush.setColor(QtGui.QColor(128, 128, 128, 100))
@@ -284,7 +291,7 @@ class GraphicsLayoutWidget:
                 endIdx = self.data.shape[1] if cl.endIdx == -1 else cl.endIdx
                 for lr in cl.linReg:
                     #lr.setRegion([cl.startIdx, endIdx])
-                    lr.setRect(cl.startIdx, -10, endIdx - cl.startIdx, 20)
+                    lr.setRect(cl.startIdx, -500, endIdx - cl.startIdx, 1000)
 
         self.__setStatusLabel()
 
@@ -333,6 +340,9 @@ class GraphicsLayoutWidget:
 
         # append
         self.data = np.hstack((self.data, ndata))
+
+        # keep track of min / max values for axis limits
+        self.minMaxVals = np.vstack((np.amax(self.data, 1), np.amin(self.data, 1)));
 
     @pyqtSlot(tuple)
     def onShortcutEnable(self, data):
