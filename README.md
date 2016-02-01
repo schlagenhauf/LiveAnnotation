@@ -1,8 +1,13 @@
 # LiveAnnotation
 
 ## A tool for annotating live sensor data via shortcuts. Also allows to view and save camera input.
+### Bugs:
+  * It is sometimes necessary to start / pause / start the video stream, before anything is displayed.
+  * Sometimes the stream state machine gets stuck.
+  * You can enable multiple lables at the same data point, but the output data format currently does not allow that and will only write one label per data point.
 
 ### TODO:
+  * Actually use all config values.
   * Write annotation data directly into video file
   * Make GStreamer handling more robust
   * Implement network video streaming
@@ -21,3 +26,6 @@ python-pyqtgraph python-qt4 python-qt4-gl python-gst-1.0`
 ### How to use:
 Pipe your input data directly to the script:
 `cat your_data_file.txt | ./liveannotation.py`
+
+If you want to read your own data format, change the method "processData()" in the "DataParser" class (currently line 167).
+There you can specify your own delimiter (whitespace, tab, etc.) and if columns at the start or end should be ignored.
