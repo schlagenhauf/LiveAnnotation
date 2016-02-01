@@ -765,6 +765,7 @@ class AnnotationConfigWidget(QtGui.QWidget):
     def configure(self, config):
         """Reads annotation widget config from config class."""
         self.saveKeyMapping = config.getValue('SaveAnnotatorKeyMapping')
+        self.simultaneousLabels = config.getValue('ConcurrentLabels')
 
     def loadConfig(self, path):
         """Loads the annotation config from a binary file."""
@@ -966,7 +967,6 @@ class Annotator(QtCore.QObject):
 
     def configure(self, config):
         """Read annotation parameters from config class."""
-        self.allowMultiLabel = config.getValue('ConcurrentLabels')
         self.sampleRate = config.getValue('DataSampleRate')
         self.saveKeyMaps = config.getValue('SaveAnnotatorKeyMapping')
         self.output = config.getValue('AnnotatorDataOutputTarget')
